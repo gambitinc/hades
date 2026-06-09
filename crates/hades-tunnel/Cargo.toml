@@ -1,0 +1,11 @@
+[package]
+name = "hades-tunnel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+hades-core = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }

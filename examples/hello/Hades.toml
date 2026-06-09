@@ -1,0 +1,18 @@
+# The canonical hello-world: build the Dockerfile here, serve on 8000,
+# 2 replicas round-robined by the proxy.
+[app]
+name = "hello"
+ports = [8000]
+replicas = 2
+priority = "low"
+
+[app.build]
+dockerfile = "Dockerfile"
+context = "."
+
+[app.resources]
+cpu = 0.5
+memory = "128mb"
+
+[app.health_check]
+path = "/"

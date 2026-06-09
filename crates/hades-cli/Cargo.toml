@@ -1,0 +1,23 @@
+[package]
+name = "hades-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "hades"
+path = "src/main.rs"
+
+[dependencies]
+hades-core = { workspace = true }
+hades-api = { workspace = true }
+hades-host = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+futures-util = { workspace = true }
+reqwest = { workspace = true }

@@ -1,0 +1,16 @@
+# The hades website, served by hades itself.
+[app]
+name = "gates"
+ports = [8000]
+priority = "normal"
+
+[app.build]
+dockerfile = "Dockerfile"
+context = "."
+
+[app.resources]
+cpu = 0.25
+memory = "64mb"
+
+[app.health_check]
+path = "/"

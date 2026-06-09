@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HADES — Host-Aware Deployment &amp; Execution System</title>
+<meta name="description" content="Turn the machine you already own into a real cloud. One script. One login. Deploy, receive a link.">
+<style>
+  :root {
+    --void:  #070504;
+    --soot:  #131008;
+    --panel: #0e0b08;
+    --line:  #2b2218;
+    --bone:  #e7ddc8;
+    --smoke: #8a7b63;
+    --gold:  #c9a227;
+    --ember: #a31621;
+    --flame: #d24a1e;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    background: var(--void);
+    color: var(--bone);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 14px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: var(--gold); text-decoration:none; border-bottom:1px solid var(--line); }
+  a:hover { border-bottom-color: var(--gold); }
+  ::selection { background: var(--ember); color: var(--bone); }
+
+  /* ── the film ─────────────────────────────────────────── */
+  #gl { position: fixed; inset: 0; z-index: 0; display: block; }
+  #cinema { height: 420vh; position: relative; }
+  body.no3d #cinema { height: 100vh; }
+  body.no3d #gl { display:none; }
+  body.no3d #cinema::before {
+    content:""; position:absolute; inset:0;
+    background:
+      radial-gradient(140% 50% at 50% 100%, rgba(163,22,33,.28), transparent 65%),
+      linear-gradient(#070504 45%, #120806 100%);
+  }
+
+  .overlay {
+    position: fixed; inset: 0; z-index: 2;
+    display: grid; place-items: center;
+    pointer-events: none; text-align: center;
+  }
+  #title h1 {
+    font-weight: 300;
+    font-size: clamp(44px, 7.5vw, 104px);
+    line-height: 1; letter-spacing: .42em;
+    margin-left: .42em; /* optically recenter tracked text */
+    color: var(--bone);
+    text-shadow: 0 0 70px rgba(210,74,30,.3);
+  }
+  #title .expand {
+    margin-top: 30px;
+    font-size: 11.5px; letter-spacing: .42em; text-transform: uppercase;
+    color: var(--smoke); word-spacing: .6em;
+  }
+  #title .expand b { color: var(--gold); font-weight: 400; }
+  #title .one-liner {
+    margin-top: 14px;
+    font-size: 11px; letter-spacing: .3em; text-transform: uppercase;
+    color: var(--smoke);
+  }
+  #cue {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    z-index: 2; color: var(--smoke);
+    font-size: 10px; letter-spacing: .5em; text-transform: uppercase;
+    animation: pulse 2.6s ease-in-out infinite; pointer-events: none;
+  }
+  @keyframes pulse { 0%,100% { opacity:.25 } 50% { opacity:.9 } }
+  .caption {
+    position: fixed; inset: 0; z-index: 2;
+    display: grid; place-items: center; text-align: center;
+    pointer-events: none; opacity: 0;
+  }
+  .caption p {
+    font-size: clamp(13px, 1.5vw, 17px); color: var(--bone);
+    letter-spacing: .34em; text-transform: uppercase;
+    max-width: 44ch; line-height: 2.1;
+    text-shadow: 0 2px 40px rgba(0,0,0,.9);
+  }
+  .caption p b { color: var(--gold); font-weight: 400; }
+
+  /* ── nav ──────────────────────────────────────────────── */
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    border-bottom: 1px solid transparent;
+    transition: background .4s, border-color .4s;
+  }
+  header.solid {
+    background: color-mix(in srgb, var(--void) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom-color: var(--line);
+  }
+  .bar {
+    max-width: 1100px; margin: 0 auto; padding: 0 24px;
+    height: 54px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .mark { display:flex; align-items:center; gap:10px; border:none; }
+  .mark b { font-weight:400; font-size:14px; letter-spacing:.4em; color:var(--bone); }
+  .mark .sigil { color: var(--gold); }
+  nav.links { display:flex; gap:26px; }
+  nav.links a {
+    border: none; color: var(--smoke);
+    font-size: 11px; letter-spacing: .28em; text-transform: uppercase;
+  }
+  nav.links a:hover { color: var(--gold); }
+
+  /* ── content ──────────────────────────────────────────── */
+  #content { position: relative; z-index: 5; background: var(--void); }
+  #content::before {
+    content:""; position:absolute; top:-140px; left:0; right:0; height:140px;
+    background: linear-gradient(transparent, var(--void)); pointer-events:none;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 84px 0; border-bottom: 1px solid var(--line); }
+  .rubric { display:flex; align-items:baseline; gap:16px; margin-bottom:30px; }
+  .rubric .n { color:var(--gold); font-size:12px; min-width:32px; letter-spacing:.1em; }
+  .rubric h2 { font-size:12px; font-weight:400; letter-spacing:.38em; text-transform:uppercase; }
+  .rubric .rule { flex:1; height:1px; background:var(--line); }
+
+  .cmdbox { display:flex; align-items:stretch; border:1px solid var(--line); background:var(--panel); }
+  .cmdbox pre { flex:1; padding:22px 24px; overflow-x:auto; white-space:pre; font-size:15px; }
+  .cmdbox .p { color:var(--ember); user-select:none; }
+  .cmdbox button {
+    border:none; border-left:1px solid var(--line); background:transparent; color:var(--gold);
+    font:inherit; font-size:11px; letter-spacing:.3em; text-transform:uppercase;
+    padding:0 28px; cursor:pointer;
+  }
+  .cmdbox button:hover { background:var(--soot); }
+  .caption-txt { margin-top:14px; color:var(--smoke); font-size:12.5px; max-width:74ch; }
+  .caption-txt b { color:var(--bone); font-weight:400; }
+
+  .rgrid { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--line); border-right:none; }
+  .rite { border-right:1px solid var(--line); padding:28px 26px 32px; background:var(--panel); }
+  .rite .num { font-size:26px; font-weight:300; color:var(--gold); line-height:1; letter-spacing:.1em; }
+  .rite h3 { margin:16px 0 10px; font-size:11px; font-weight:400; letter-spacing:.34em; text-transform:uppercase; }
+  .rite p { color:var(--smoke); font-size:12.5px; min-height:56px; }
+  .rite code { display:block; margin-top:16px; padding:12px 14px; border:1px solid var(--line); background:var(--void); color:var(--bone); font-size:13px; white-space:pre; overflow-x:auto; }
+  .rite code .c { color:var(--smoke); } .rite code .g { color:var(--gold); }
+  @media (max-width:820px){ .rgrid{grid-template-columns:1fr;border-right:1px solid var(--line);} .rite{border-right:none;border-bottom:1px solid var(--line);} .rite:last-child{border-bottom:none;} }
+
+  .dgrid { display:grid; grid-template-columns:repeat(2,1fr); border-top:1px solid var(--line); border-left:1px solid var(--line); }
+  .doc { border-right:1px solid var(--line); border-bottom:1px solid var(--line); padding:30px 28px 34px; }
+  .doc .tag { font-size:10px; letter-spacing:.34em; text-transform:uppercase; color:var(--ember); }
+  .doc h3 { margin:12px 0 12px; font-weight:400; font-size:14px; letter-spacing:.22em; text-transform:uppercase; }
+  .doc p { color:var(--smoke); font-size:12.5px; }
+  .doc p b { color:var(--bone); font-weight:400; }
+  @media (max-width:820px){ .dgrid{grid-template-columns:1fr;} }
+  .epigraph { margin-top:34px; text-align:center; font-size:12px; letter-spacing:.28em; text-transform:uppercase; color:var(--smoke); }
+  .epigraph b { color:var(--gold); font-weight:500; }
+
+  .docs-card {
+    display:flex; justify-content:space-between; align-items:center; gap:24px;
+    border:1px solid var(--line); background:var(--panel); padding:30px 30px;
+  }
+  .docs-card h3 { font-weight:400; font-size:15px; letter-spacing:.24em; text-transform:uppercase; }
+  .docs-card p { color:var(--smoke); font-size:12.5px; margin-top:6px; }
+  .docs-card a.btn {
+    border:1px solid var(--gold); color:var(--gold); padding:12px 26px;
+    font-size:11px; letter-spacing:.3em; text-transform:uppercase; white-space:nowrap;
+  }
+  .docs-card a.btn:hover { background:var(--gold); color:var(--void); }
+
+  .codes { border-collapse:collapse; max-width:560px; width:100%; }
+  .codes td { border:1px solid var(--line); padding:8px 14px; font-size:12px; color:var(--smoke); }
+  .codes td:first-child { color:var(--gold); width:42px; text-align:center; }
+  footer { padding:48px 0 72px; color:var(--smoke); font-size:11.5px; }
+  footer .sig { letter-spacing:.3em; text-transform:uppercase; }
+  footer .sig b { color:var(--bone); font-weight:400; }
+</style>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+
+<header id="hdr">
+  <div class="bar">
+    <a class="mark" href="#"><span class="sigil">⚖</span><b>HADES</b></a>
+    <nav class="links">
+      <a href="docs.html">Docs</a>
+      <a href="#install">Install</a>
+    </nav>
+  </div>
+</header>
+
+<!-- the scroll-film -->
+<div id="cinema"></div>
+
+<div class="overlay" id="title">
+  <div>
+    <h1>HADES</h1>
+    <p class="expand"><b>H</b>ost-<b>A</b>ware <b>D</b>eployment &amp; <b>E</b>xecution <b>S</b>ystem</p>
+    <p class="one-liner">your hardware. a real cloud.</p>
+  </div>
+</div>
+<div id="cue">scroll</div>
+<div class="caption" id="cap1"><p>A personal cloud, carved from the<br>machine you <b>already own</b>.</p></div>
+<div class="caption" id="cap2"><p>The host knows its own limits —<br><b>every claim is weighed</b>.</p></div>
+
+<!-- the shore on the other side -->
+<main id="content">
+  <div class="wrap">
+
+    <section id="install">
+      <div class="rubric"><span class="n">01</span><h2>Install</h2><div class="rule"></div></div>
+      <div class="cmdbox">
+        <pre><span class="p">$</span> <span id="cmd">curl -fsSL https://hades.sh/install.sh | sh</span></pre>
+        <button id="copy" type="button" aria-label="copy install command">copy</button>
+      </div>
+      <p class="caption-txt">One script, idempotent. It checks prerequisites (Docker, cloudflared, Rust),
+      builds the binaries, puts the daemon under <b>launchd</b> so it survives reboots and crashes,
+      wires a push-notification channel to your phone, and runs the <b>doctor</b> — it will not call
+      the host ready until every check passes.</p>
+    </section>
+
+    <section>
+      <div class="rubric"><span class="n">02</span><h2>Three steps</h2><div class="rule"></div></div>
+      <div class="rgrid">
+        <div class="rite">
+          <div class="num">1</div>
+          <h3>Install</h3>
+          <p>Run the script on the Mac that will serve. No account, no port forwarding,
+          no YAML rituals.</p>
+          <code><span class="c"># on the host</span>
+curl -fsSL https://hades.sh/install.sh | sh</code>
+        </div>
+        <div class="rite">
+          <div class="num">2</div>
+          <h3>Log in</h3>
+          <p>Connect the CLI to your host. It verifies health and tells you exactly
+          what the machine can carry.</p>
+          <code>$ hades login
+<span class="g">⚖ you have entered the underworld</span>
+  doctor    GREEN — ready for deploys
+  capacity  6348MB allocatable</code>
+        </div>
+        <div class="rite">
+          <div class="num">3</div>
+          <h3>Deploy</h3>
+          <p>Scaffold a manifest in any project, deploy, get a public link.
+          Deploys are idempotent — retries are always safe.</p>
+          <code>$ hades init &amp;&amp; hades deploy
+<span class="g">hello deployed</span>
+  public: https://…trycloudflare.com</code>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="rubric"><span class="n">03</span><h2>Built for real hardware</h2><div class="rule"></div></div>
+      <div class="dgrid">
+        <div class="doc">
+          <div class="tag">Uptime</div>
+          <h3>Downtime, classified</h3>
+          <p>Laptops sleep. HADES detects every downtime window and classifies it —
+          <b>slept / crashed / rebooted</b> — in an uptime ledger. Your phone gets a
+          priority push when the host returns, carrying the new links.</p>
+        </div>
+        <div class="doc">
+          <div class="tag">Power</div>
+          <h3>Battery, diagnosed</h3>
+          <p>Continuous telemetry feeds a degradation diagnosis: high-charge dwell,
+          cycle burn, heat under load — including <b>how much was HADES' own doing</b>.
+          Apps can opt to pause on battery.</p>
+        </div>
+        <div class="doc">
+          <div class="tag">Memory</div>
+          <h3>Admission control</h3>
+          <p>Memory must be declared. Overcommitting deploys are refused, and the
+          refusal carries the <b>full allocation ledger</b> so you know what to shrink.
+          Hard limits, OOM detection, restart backoff, crash-loop cutoff.</p>
+        </div>
+        <div class="doc">
+          <div class="tag">Load</div>
+          <h3>Deliberate shedding</h3>
+          <p>Replicas are round-robined. Floods are met with <b>503 + Retry-After</b>,
+          never collapse. Under pressure, low-priority apps pause first —
+          critical ones are never touched.</p>
+        </div>
+      </div>
+      <p class="epigraph">«&nbsp;A rented server fails silently. This one <b>confesses</b>.&nbsp;»</p>
+    </section>
+
+    <section>
+      <div class="rubric"><span class="n">04</span><h2>Documentation</h2><div class="rule"></div></div>
+      <div class="docs-card">
+        <div>
+          <h3>The complete reference</h3>
+          <p>Manifest fields, every CLI command, the JSON contract, event types,
+          architecture, configuration.</p>
+        </div>
+        <a class="btn" href="docs.html">Read the docs</a>
+      </div>
+    </section>
+
+    <section>
+      <div class="rubric"><span class="n">05</span><h2>For agents</h2><div class="rule"></div></div>
+      <table class="codes">
+        <tr><td>0</td><td>ok — parse stdout as one JSON object (<i>--json</i>)</td></tr>
+        <tr><td>2</td><td>host not ready — doctor red, remedies in the report</td></tr>
+        <tr><td>3</td><td>deploy rejected — overcommit; the error carries the ledger</td></tr>
+        <tr><td>4</td><td>not found</td></tr>
+        <tr><td>5</td><td>daemon unreachable</td></tr>
+        <tr><td>6</td><td>invalid spec</td></tr>
+      </table>
+      <p class="caption-txt">The CLI is the entire interface — no MCP server, no SDK, no dashboard.
+      An agent that can run a shell can operate the whole host:
+      <b>hades deploy --json | jq -r .app.url</b></p>
+    </section>
+
+    <footer>
+      <p class="sig"><b>HADES</b> — Host-Aware Deployment &amp; Execution System</p>
+    </footer>
+  </div>
+</main>
+
+<script>
+  // install command points at whatever origin serves this page
+  const cmdEl = document.getElementById('cmd');
+  if (location.protocol.startsWith('http')) {
+    cmdEl.textContent = `curl -fsSL ${location.origin}/install.sh | sh`;
+  }
+  document.getElementById('copy').addEventListener('click', async (e) => {
+    await navigator.clipboard.writeText(cmdEl.textContent);
+    e.target.textContent = 'copied';
+    setTimeout(() => { e.target.textContent = 'copy'; }, 1600);
+  });
+</script>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }     from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass }     from 'three/addons/postprocessing/OutputPass.js';
+
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const canvas = document.getElementById('gl');
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+} catch (e) {
+  document.body.classList.add('no3d');
+}
+
+if (renderer) {
+  const isMobile = matchMedia('(max-width: 820px)').matches || navigator.maxTouchPoints > 1;
+  const DPR = Math.min(devicePixelRatio || 1, isMobile ? 1.25 : 1.75);
+  renderer.setPixelRatio(DPR);
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x070504, 0.00085);
+  const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 5000);
+
+  // ─── shared noise (Ashima simplex, public domain) ───────────────────
+  const NOISE = /* glsl */`
+  vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
+  vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}
+  vec4 permute(vec4 x){return mod289(((x*34.0)+1.0)*x);}
+  vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
+  float snoise(vec3 v){
+    const vec2 C=vec2(1.0/6.0,1.0/3.0); const vec4 D=vec4(0.0,0.5,1.0,2.0);
+    vec3 i=floor(v+dot(v,C.yyy)); vec3 x0=v-i+dot(i,C.xxx);
+    vec3 g=step(x0.yzx,x0.xyz); vec3 l=1.0-g; vec3 i1=min(g.xyz,l.zxy); vec3 i2=max(g.xyz,l.zxy);
+    vec3 x1=x0-i1+C.xxx; vec3 x2=x0-i2+C.yyy; vec3 x3=x0-D.yyy;
+    i=mod289(i);
+    vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));
+    float n_=0.142857142857; vec3 ns=n_*D.wyz-D.xzx;
+    vec4 j=p-49.0*floor(p*ns.z*ns.z);
+    vec4 x_=floor(j*ns.z); vec4 y_=floor(j-7.0*x_);
+    vec4 x=x_*ns.x+ns.yyyy; vec4 y=y_*ns.x+ns.yyyy; vec4 h=1.0-abs(x)-abs(y);
+    vec4 b0=vec4(x.xy,y.xy); vec4 b1=vec4(x.zw,y.zw);
+    vec4 s0=floor(b0)*2.0+1.0; vec4 s1=floor(b1)*2.0+1.0; vec4 sh=-step(h,vec4(0.0));
+    vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy; vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+    vec3 p0=vec3(a0.xy,h.x); vec3 p1=vec3(a0.zw,h.y); vec3 p2=vec3(a1.xy,h.z); vec3 p3=vec3(a1.zw,h.w);
+    vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+    p0*=norm.x; p1*=norm.y; p2*=norm.z; p3*=norm.w;
+    vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0); m=m*m;
+    return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+  }`;
+
+  // the one height function both shaders agree on
+  const HEIGHT = /* glsl */`
+  float seaH(vec2 q, float t, float storm){
+    float w = 0.0;
+    w += sin(q.x*0.014 + t*1.05) * 2.2;
+    w += sin(q.y*0.020 - t*0.80) * 1.8;
+    w += sin((q.x+q.y)*0.0065 + t*0.50) * 3.6;
+    w += snoise(vec3(q*0.018, t*0.25)) * 2.6;
+    w += snoise(vec3(q*0.052, t*0.55)) * 0.9;
+    return w * (1.0 + storm*2.6);
+  }`;
+
+  // ─── sky: night, smoke, an ember smolder at the waterline ──────────
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(3000, 32, 24),
+    new THREE.ShaderMaterial({
+      side: THREE.BackSide, depthWrite: false, fog: false,
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: /* glsl */`
+        varying vec3 vDir;
+        void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+      fragmentShader: NOISE + /* glsl */`
+        varying vec3 vDir; uniform float uTime;
+        void main(){
+          float h = clamp(vDir.y, -0.12, 1.0);
+          vec3 top = vec3(0.004, 0.003, 0.005);
+          vec3 mid = vec3(0.045, 0.012, 0.010);
+          vec3 low = vec3(0.17, 0.040, 0.016);
+          vec3 col = mix(low, mid, smoothstep(0.0, 0.09, h));
+          col = mix(col, top, smoothstep(0.06, 0.38, h));
+          float smoke = snoise(vec3(vDir.x*3.0, vDir.y*6.0, uTime*0.02));
+          col *= 1.0 + 0.12*smoke*smoothstep(0.4, 0.0, h);
+          gl_FragColor = vec4(col, 1.0);
+        }`
+    })
+  );
+  scene.add(sky);
+
+  // ─── the water ──────────────────────────────────────────────────────
+  const SEG = isMobile ? [220, 140] : [420, 260];
+  const seaUniforms = {
+    uTime:  { value: 0 },
+    uStorm: { value: 0 },   // 0 calm → 1 heaving
+  };
+  const sea = new THREE.Mesh(
+    new THREE.PlaneGeometry(6400, 4200, SEG[0], SEG[1]),
+    new THREE.ShaderMaterial({
+      fog: false,
+      uniforms: seaUniforms,
+      vertexShader: NOISE + HEIGHT + /* glsl */`
+        uniform float uTime, uStorm;
+        varying vec3 vPos; varying vec3 vN; varying float vH;
+        void main(){
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          float t = uTime;
+          float h0 = seaH(wp.xz, t, uStorm);
+          wp.y += h0;
+          // normals by finite difference on the same height field
+          float e = 7.0;
+          float hx = seaH(wp.xz + vec2(e, 0.0), t, uStorm);
+          float hz = seaH(wp.xz + vec2(0.0, e), t, uStorm);
+          vN = normalize(vec3(h0 - hx, e, h0 - hz));
+          vPos = wp.xyz; vH = h0;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }`,
+      fragmentShader: NOISE + /* glsl */`
+        uniform float uTime, uStorm;
+        varying vec3 vPos; varying vec3 vN; varying float vH;
+        void main(){
+          vec3 N = normalize(vN);
+          vec3 V = normalize(cameraPosition - vPos);
+
+          // black water
+          vec3 col = vec3(0.012, 0.009, 0.009);
+
+          // a low ember light living past the horizon
+          vec3 L = normalize(vec3(0.0, 0.16, -1.0));
+          vec3 emberHot  = vec3(1.00, 0.32, 0.10);
+          vec3 emberDeep = vec3(0.55, 0.12, 0.05);
+
+          // broad sheen across slopes that face the glow
+          float facing = max(dot(N, L), 0.0);
+          col += emberDeep * pow(facing, 3.0) * 0.10;
+
+          // tight moving glints — the light snagging on wave faces
+          vec3 R = reflect(-L, N);
+          float spec = pow(max(dot(R, V), 0.0), 110.0);
+          col += emberHot * spec * 1.1;
+          float sheen = pow(max(dot(R, V), 0.0), 9.0);
+          col += emberDeep * sheen * 0.10;
+
+          // fresnel: grazing angles pick up the horizon smolder
+          float fres = pow(1.0 - max(dot(N, V), 0.0), 4.0);
+          float toward = smoothstep(0.0, 0.5, -normalize(vPos - cameraPosition).z);
+          col += vec3(0.30, 0.07, 0.03) * fres * toward * 0.55;
+
+          // storm crests: dark water torn slightly pale at the peaks
+          float crest = smoothstep(6.0, 13.0, vH) * (0.35 + 0.65*uStorm);
+          col += vec3(0.18, 0.07, 0.045) * crest;
+
+          // distance dissolves into the smolder, then the dark
+          float d = length(vPos - cameraPosition);
+          float haze = 1.0 - exp(-d * 0.00075);
+          col = mix(col, vec3(0.055, 0.016, 0.010), haze * 0.85);
+
+          gl_FragColor = vec4(col, 1.0);
+        }`
+    })
+  );
+  sea.rotation.x = -Math.PI / 2;
+  sea.position.set(0, 0, -1200);
+  scene.add(sea);
+
+  // ─── post ───────────────────────────────────────────────────────────
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.45, 0.5, 0.75);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+
+  // ─── the journey: glide low, the sea rises, pass into the dark ─────
+  const cinema = document.getElementById('cinema');
+  const titleEl = document.getElementById('title');
+  const cueEl = document.getElementById('cue');
+  const cap1 = document.getElementById('cap1');
+  const cap2 = document.getElementById('cap2');
+  const hdr = document.getElementById('hdr');
+
+  const sstep = (a, b, x) => { const t = Math.min(Math.max((x-a)/(b-a), 0), 1); return t*t*(3-2*t); };
+  let mouseX = 0, mouseY = 0;
+  addEventListener('pointermove', e => {
+    mouseX = (e.clientX/innerWidth - 0.5);
+    mouseY = (e.clientY/innerHeight - 0.5);
+  }, { passive: true });
+
+  const forcedP = new URLSearchParams(location.search).get('p');
+  let progress = 0;
+  function onScroll(){
+    if (forcedP !== null) { progress = +forcedP; return; }
+    const span = cinema.offsetHeight - innerHeight;
+    progress = span > 0 ? Math.min(Math.max(scrollY / span, 0), 1) : 1;
+    hdr.classList.toggle('solid', scrollY > innerHeight * 0.5);
+  }
+  addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+  if (reduced && forcedP === null) { progress = 0.5; }
+
+  const clock = new THREE.Clock();
+  let raf = null;
+  function frame(){
+    raf = requestAnimationFrame(frame);
+    const t = clock.getElapsedTime();
+    const p = progress;
+
+    const approach = sstep(0.00, 0.45, p);   // drift forward
+    const storm    = sstep(0.30, 0.80, p);   // the sea rises
+    const through  = sstep(0.82, 1.00, p);   // into the dark
+
+    seaUniforms.uTime.value = t;
+    seaUniforms.uStorm.value = storm;
+    sky.material.uniforms.uTime.value = t;
+
+    // low over calm water → lifted above a heaving sea → swallowed
+    const camZ = 330 - 420*approach - 520*through;
+    const camY = 26 + 30*storm - 20*through + Math.sin(t*0.45)*(0.8 + 2.2*storm);
+    const camX = Math.sin(t*0.2)*3 + mouseX*16;
+    camera.position.set(camX, Math.max(camY, 10), camZ);
+    const lookY = 2 - 14*storm + 6*through + mouseY*-10;
+    camera.lookAt(mouseX*30, lookY, camZ - 600);
+
+    scene.fog.density = 0.00085 + 0.004*through;
+    renderer.toneMappingExposure = 0.95 + 0.12*storm - 0.7*through;
+    bloom.strength = 0.45 + 0.35*storm - 0.3*through;
+
+    titleEl.style.opacity = String(1 - sstep(0.04, 0.20, p));
+    titleEl.style.transform = `translateY(${-40*sstep(0.04,0.20,p)}px)`;
+    cueEl.style.opacity = String((1 - sstep(0.02, 0.07, p)) * 0.9);
+    cap1.style.opacity = String(sstep(0.26, 0.36, p) * (1 - sstep(0.50, 0.60, p)));
+    cap2.style.opacity = String(sstep(0.62, 0.72, p) * (1 - sstep(0.86, 0.94, p)));
+
+    composer.render();
+  }
+  frame();
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+    composer.setSize(innerWidth, innerHeight);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { cancelAnimationFrame(raf); raf = null; }
+    else if (!raf) frame();
+  });
+} else {
+  document.body.classList.add('no3d');
+}
+</script>
+</body>
+</html>

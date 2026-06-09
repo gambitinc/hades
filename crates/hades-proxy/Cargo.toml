@@ -1,0 +1,13 @@
+[package]
+name = "hades-proxy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+hades-core = { workspace = true }
+tokio = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http-body-util = { workspace = true }
+tracing = { workspace = true }

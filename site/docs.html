@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs — HADES</title>
+<meta name="description" content="HADES reference: install, login, manifest, CLI, JSON contract, events, architecture, configuration.">
+<style>
+  :root {
+    --void:#070504; --soot:#131008; --panel:#0e0b08; --line:#2b2218;
+    --bone:#e7ddc8; --smoke:#8a7b63; --gold:#c9a227; --ember:#a31621; --flame:#d24a1e;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html{scroll-behavior:smooth;scroll-padding-top:80px;}
+  body{background:var(--void);color:var(--bone);font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased;}
+  a{color:var(--gold);text-decoration:none;border-bottom:1px solid var(--line);}
+  a:hover{border-bottom-color:var(--gold);}
+  ::selection{background:var(--ember);color:var(--bone);}
+
+  header{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--void) 90%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);}
+  .bar{max-width:1180px;margin:0 auto;padding:0 24px;height:54px;display:flex;justify-content:space-between;align-items:center;}
+  .mark{display:flex;align-items:center;gap:10px;border:none;}
+  .mark b{font-weight:400;font-size:14px;letter-spacing:.4em;color:var(--bone);}
+  .mark .sigil{color:var(--gold);}
+  .bar .meta{color:var(--smoke);font-size:11px;letter-spacing:.2em;text-transform:uppercase;border:none;}
+
+  .layout{max-width:1180px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:230px minmax(0,1fr);gap:56px;}
+  @media(max-width:900px){.layout{grid-template-columns:1fr;}aside{display:none;}}
+
+  aside{padding:48px 0;}
+  aside nav{position:sticky;top:86px;}
+  aside .toc-h{font-size:10px;letter-spacing:.4em;text-transform:uppercase;color:var(--smoke);margin-bottom:16px;}
+  aside a{display:block;border:none;color:var(--smoke);font-size:12px;padding:5px 0 5px 14px;border-left:1px solid var(--line);}
+  aside a:hover{color:var(--gold);border-left-color:var(--gold);}
+
+  article{padding:48px 0 120px;max-width:760px;}
+  h1{font-weight:300;font-size:26px;line-height:1.2;letter-spacing:.3em;text-transform:uppercase;}
+  .lede{margin:18px 0 0;color:var(--smoke);max-width:60ch;}
+  .lede b{color:var(--bone);font-weight:400;}
+  section{margin-top:72px;}
+  h2{font-size:12px;font-weight:400;letter-spacing:.38em;text-transform:uppercase;color:var(--bone);display:flex;align-items:baseline;gap:14px;}
+  h2 .n{color:var(--gold);font-size:12px;letter-spacing:.1em;}
+  h2::after{content:"";flex:1;height:1px;background:var(--line);}
+  h3{font-weight:400;font-size:13px;letter-spacing:.24em;text-transform:uppercase;margin:34px 0 10px;color:var(--bone);}
+  p{color:var(--smoke);margin:12px 0;}
+  p b, li b{color:var(--bone);font-weight:400;}
+  ul{margin:12px 0 12px 18px;color:var(--smoke);}
+  li{margin:6px 0;}
+  pre{border:1px solid var(--line);background:var(--panel);padding:18px 20px;overflow-x:auto;font-size:13px;line-height:1.55;margin:16px 0;color:var(--bone);}
+  pre .c{color:var(--smoke);} pre .g{color:var(--gold);} pre .r{color:var(--flame);}
+  code{color:var(--bone);background:var(--soot);padding:1px 6px;border:1px solid var(--line);font-size:12.5px;}
+  pre code{background:none;border:none;padding:0;}
+  table{border-collapse:collapse;width:100%;margin:16px 0;font-size:12.5px;}
+  td,th{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top;}
+  th{color:var(--bone);font-weight:400;letter-spacing:.18em;text-transform:uppercase;font-size:10.5px;background:var(--panel);}
+  td{color:var(--smoke);}
+  td:first-child{color:var(--gold);white-space:nowrap;}
+  .note{border-left:2px solid var(--gold);padding:10px 18px;background:var(--panel);margin:16px 0;font-size:12.5px;color:var(--smoke);}
+  .note b{color:var(--bone);font-weight:400;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <a class="mark" href="index.html"><span class="sigil">⚖</span><b>HADES</b></a>
+    <span class="meta">documentation</span>
+  </div>
+</header>
+
+<div class="layout">
+  <aside>
+    <nav>
+      <div class="toc-h">Contents</div>
+      <a href="#install">Install</a>
+      <a href="#login">Log in</a>
+      <a href="#first-deploy">First deploy</a>
+      <a href="#manifest">Hades.toml</a>
+      <a href="#cli">CLI reference</a>
+      <a href="#json">JSON contract</a>
+      <a href="#events">Events</a>
+      <a href="#operations">Operating the host</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#config">Configuration</a>
+    </nav>
+  </aside>
+
+  <article>
+    <h1>Documentation</h1>
+    <p class="lede"><b>HADES</b> — the Host-Aware Deployment &amp; Execution System — turns a
+    machine you own into a small, honest cloud: declare an app, get a container, a route,
+    and a public link. <b>Host-aware</b> means the system treats the hardware's real
+    constraints — sleep, battery, memory, load — as first-class signals, not surprises.</p>
+
+    <!-- ════════════════════════════ -->
+    <section id="install">
+      <h2><span class="n">01</span>Install</h2>
+      <pre><code>curl -fsSL https://hades.sh/install.sh | sh</code></pre>
+      <p>The script is idempotent — run it again any time. It will:</p>
+      <ul>
+        <li>verify <b>Docker</b> (installs Docker Desktop via Homebrew if missing, starts the engine)</li>
+        <li>install <b>cloudflared</b> for public links (optional; apps degrade to local URLs without it)</li>
+        <li>install <b>Rust</b> via rustup if needed, then build the <code>hades</code> and <code>hadesd</code> binaries</li>
+        <li>place binaries in <code>~/.hades/bin</code> and add it to your PATH</li>
+        <li>run <code>hades host init</code>: write config, generate an <b>ntfy.sh notification topic</b>
+            for your phone, install the daemon under <b>launchd</b> (starts at login, restarts on crash),
+            and run the doctor</li>
+      </ul>
+      <div class="note"><b>The doctor gates everything.</b> The daemon refuses deploys while any
+      hard check fails — Docker down, disk low, no egress, port conflicts. <code>hades host doctor</code>
+      prints each failure with its exact remedy.</div>
+      <h3>Manual install</h3>
+      <pre><code><span class="c"># from a checkout</span>
+cargo build --release --workspace
+export PATH="$PWD/target/release:$PATH"
+hades host init</code></pre>
+    </section>
+
+    <!-- ════════════════════════════ -->
+    <section id="login">
+      <h2><span class="n">02</span>Log in</h2>
+      <pre><code>$ hades login
+<span class="g">⚖ you have entered the underworld</span>
+
+  host      127.0.0.1:8786 — hadesd v0.1.0
+  doctor    GREEN — ready for deploys
+  capacity  6348MB allocatable · 0MB claimed · 0 apps</code></pre>
+      <p><code>hades login</code> connects the CLI to your host, verifies the daemon is healthy
+      and the doctor is green, records the session in <code>~/.hades/session.json</code>, and
+      reports what the machine can carry. Exit code <b>0</b> means ready; <b>2</b> means the
+      doctor is red; <b>5</b> means no daemon.</p>
+      <div class="note">Today the daemon binds loopback only, so login connects to your own
+      machine. Remote hosts over a tailnet or SSH tunnel are a planned extension —
+      the CLI⇄daemon contract is already fully network-shaped (specs and build contexts
+      travel over HTTP, never the filesystem).</div>
+    </section>
+
+    <!-- ════════════════════════════ -->
+    <section id="first-deploy">
+      <h2><span class="n">03</span>First deploy</h2>
+      <pre><code>$ cd my-app
+$ hades init                    <span class="c"># scaffolds Hades.toml</span>
+$ hades deploy
+<span class="g">my-app deployed</span>
+  local:  http://my-app.localhost:8787
+  public: https://lazy-otter-4242.trycloudflare.com</code></pre>
+      <p>The CLI packs your build context into a tarball, ships it to the daemon, and the
+      daemon builds the image, starts replicas with hard resource limits, health-gates them,
+      swaps routes, and provisions a tunnel. Deploys are <b>idempotent upserts</b>: deploying
+      an existing name replaces it with zero downtime (new replicas come up and pass health
+      checks before old ones stop). Retries are always safe.</p>
+      <div class="note"><b>Public URLs are cattle.</b> Quick tunnels mint a fresh
+      <code>*.trycloudflare.com</code> URL whenever a tunnel restarts. <code>hades url &lt;name&gt;</code>
+      always tells the current truth, and <code>url_changed_at</code> in the JSON lets agents detect
+      staleness. Stable custom domains via named tunnels are a planned provider.</div>
+    </section>
+
+    <!-- ════════════════════════════ -->
+    <section id="manifest">
+      <h2><span class="n">04</span>Hades.toml</h2>
+      <pre><code>[app]
+name = "my-app"            <span class="c"># lowercase [a-z0-9-]</span>
+ports = [8000]             <span class="c"># first port receives proxied traffic</span>
+replicas = 2
+priority = "normal"        <span class="c"># critical | normal | low</span>
+max_concurrent_requests = 64
+
+[app.build]                <span class="c"># or:  image = "nginx:alpine"</span>
+dockerfile = "Dockerfile"
+context = "."
+
+[app.resources]
+cpu = 0.5                  <span class="c"># cores, fractional ok</span>
+memory = "256mb"           <span class="c"># MANDATORY — admission control needs it</span>
+
+[app.health_check]
+path = "/"
+
+[app.power]
+on_battery = "run"         <span class="c"># or "pause"</span>
+
+[app.env]
+PORT = "8000"</code></pre>
+      <table>
+        <tr><th>field</th><th>type · default</th><th>meaning</th></tr>
+        <tr><td>name</td><td>string, required</td><td>app identity; becomes <code>&lt;name&gt;.localhost</code> and the container labels</td></tr>
+        <tr><td>image</td><td>string</td><td>registry image. Exactly one of <code>image</code> / <code>[build]</code></td></tr>
+        <tr><td>build.dockerfile</td><td>string · "Dockerfile"</td><td>path within the context</td></tr>
+        <tr><td>build.context</td><td>string · "."</td><td>directory tarred and shipped to the daemon (.git, target, node_modules excluded)</td></tr>
+        <tr><td>ports</td><td>[u16], required</td><td>exposed container ports; the first is routed</td></tr>
+        <tr><td>resources.cpu</td><td>float · 1.0</td><td>CPU quota in cores (enforced via Docker)</td></tr>
+        <tr><td>resources.memory</td><td>size, <b>required</b></td><td>hard limit, e.g. "256mb", "2gb" — the unit of admission control</td></tr>
+        <tr><td>replicas</td><td>int · 1</td><td>identical containers, round-robined by the proxy</td></tr>
+        <tr><td>priority</td><td>enum · normal</td><td>shedding order under pressure: <b>low</b> pauses first, <b>critical</b> never</td></tr>
+        <tr><td>power.on_battery</td><td>enum · run</td><td><b>pause</b> = docker-pause when the host unplugs, resume on AC</td></tr>
+        <tr><td>max_concurrent_requests</td><td>int · ∞</td><td>proxy in-flight cap; excess sheds with 503 + Retry-After</td></tr>
+        <tr><td>health_check.path</td><td>string</td><td>HTTP path probed before a replica receives traffic</td></tr>
+        <tr><td>env</td><td>table</td><td>environment variables</td></tr>
+      </table>
+    </section>
+
+    <!-- ════════════════════════════ -->
+    <section id="cli">
+      <h2><span class="n">05</span>CLI reference</h2>
+      <table>
+        <tr><th>command</th><th>what it does</th></tr>
+        <tr><td>hades login [--host]</td><td>connect to the host, verify readiness, record the session</td></tr>
+        <tr><td>hades init</td><td>scaffold a Hades.toml in the current directory</td></tr>
+        <tr><td>hades deploy [--app] [--dir]</td><td>idempotent upsert: build/pull, health-gate, swap routes, print the link</td></tr>
+        <tr><td>hades apps list</td><td>all apps with state, replicas, memory, URLs</td></tr>
+        <tr><td>hades apps logs &lt;name&gt; [--follow]</td><td>stream container logs</td></tr>
+        <tr><td>hades apps stats &lt;name&gt;</td><td>requests, in-flight, shed count, p50/p95 latency, per-replica memory/CPU</td></tr>
+        <tr><td>hades apps pause | resume &lt;name&gt;</td><td>docker-pause (keeps state, frees CPU) / resume</td></tr>
+        <tr><td>hades apps destroy &lt;name&gt;</td><td>remove containers, routes, and tunnel</td></tr>
+        <tr><td>hades url &lt;name&gt;</td><td>the current public URL (and url_changed_at in --json)</td></tr>
+        <tr><td>hades events [--follow] [--days]</td><td>the host's event stream — NDJSON with --json</td></tr>
+        <tr><td>hades notify test</td><td>send a test push through every configured channel</td></tr>
+        <tr><td>hades host init</td><td>guided idempotent bootstrap (config · ntfy · launchd · doctor)</td></tr>
+        <tr><td>hades host doctor</td><td>preflight with remedies; red = deploys refused</td></tr>
+        <tr><td>hades host status</td><td>one screen: capacity vs allocated, power, availability, apps</td></tr>
+        <tr><td>hades host battery</td><td>battery health + degradation diagnosis</td></tr>
+        <tr><td>hades host uptime [--days]</td><td>availability % and classified downtime windows</td></tr>
+        <tr><td>hades host ps</td><td>every process HADES owns: daemon, containers, tunnels, with live RSS</td></tr>
+      </table>
+    </section>
+
+    <!-- ════════════════════════════ -->
+    <section id="json">
+      <h2><span class="n">06</span>JSON contract</h2>
+      <p>Every command accepts <code>--json</code> and then prints <b>exactly one JSON object</b>
+      on stdout (streams print NDJSON). Progress and decoration go to stderr, so pipes stay clean:</p>
+      <pre><code>hades deploy --json | jq -r .app.url</code></pre>
+      <p>Errors are structured, with stable codes:</p>
+      <pre><code>{ "error": { "code": "admission_rejected",
+             "message": "deploy rejected: requested 102400MB …",
+             "detail": { "vm_memory_mb": 7935, "allocatable_mb": 6348,
+                         "allocations": [ { "app": "hello", "memory_mb": 128, "replicas": 2 } ] } } }</code></pre>
+      <table>
+        <tr><th>exit</th><th>code</th><th>meaning</th></tr>
+        <tr><td>0</td><td>—</td><td>success</td></tr>
+        <tr><td>1</td><td>other / docker / tunnel</td><td>generic failure</td></tr>
+        <tr><td>2</td><td>doctor_red</td><td>host not ready; run <code>hades host doctor</code></td></tr>
+        <tr><td>3</td><td>admission_rejected</td><td>overcommit — <code>detail</code> carries the full resource ledger</td></tr>
+        <tr><td>4</td><td>app_not_found</td><td>no such app</td></tr>
+        <tr><td>5</td><td>daemon_unreachable</td><td>hadesd not running</td></tr>
+        <tr><td>6</td><td>invalid_spec / manifest_not_found</td><td>fix the Hades.toml</td></tr>
+      </table>
+    </section>
+
+    <!-- ════════════════════════════ -->
+    <section id="events">
+      <h2><span class="n">07</span>Events</h2>
+      <p>Everything observable flows through one stream — <code>hades events --follow --json</code>
+      is the live wire. Each line is <code>{ "at": …, "type": …, …fields }</code>.</p>
+      <table>
+        <tr><th>type</th><th>fired when</th></tr>
+        <tr><td>host_up</td><td>host returns after a downtime window; carries <code>downtime_secs</code> + <code>cause</code> (slept / crashed / rebooted / unknown)</td></tr>
+        <tr><td>daemon_started</td><td>daemon boot; <code>unclean_shutdown</code> true after a crash</td></tr>
+        <tr><td>app_deployed / app_destroyed</td><td>lifecycle; <code>replaced</code> marks upserts</td></tr>
+        <tr><td>app_paused / app_resumed</td><td>manual, memory_pressure, or on_battery (the reason is included)</td></tr>
+        <tr><td>app_oom_killed</td><td>container hit its memory limit; includes the limit and restart count</td></tr>
+        <tr><td>app_crash_loop</td><td>3 kills in 10 minutes — restarts stop, urgent push sent</td></tr>
+        <tr><td>url_changed</td><td>tunnel re-provisioned; old and new URL included</td></tr>
+        <tr><td>tunnel_down</td><td>cloudflared died; re-provisioning begins</td></tr>
+        <tr><td>memory_pressure</td><td>host pressure level changed (normal / warn / critical)</td></tr>
+        <tr><td>on_battery / on_ac</td><td>power source transitions</td></tr>
+        <tr><td>disk_low</td><td>free disk crossed the threshold</td></tr>
+        <tr><td>deploy_rejected</td><td>admission control refused a deploy</td></tr>
+        <tr><td>doctor_red</td><td>a previously green host failed checks</td></tr>
+      </table>
+      <p>Urgent events (OOM kills, crash loops, host recovery after a crash, doctor red) are
+      pushed to your phone via the <b>ntfy.sh topic</b> generated at install — no account needed.
+      For true host-<i>down</i> alerts, configure a free
+      <a href="https://healthchecks.io">healthchecks.io</a> ping URL
+      (<code>hades host init --healthchecks-url …</code>): the daemon heartbeats it every minute,
+      and when heartbeats stop, <i>their</i> infrastructure alerts you — a dead host can't
+      report its own death.</p>
+    </section>
+
+    <!-- ════════════════════════════ -->
+    <section id="operations">
+      <h2><span class="n">08</span>Operating the host</h2>
+      <h3>Capacity is the VM's, not the Mac's</h3>
+      <p>On macOS, containers live inside the Docker VM. All admission math uses the
+      <b>VM's</b> memory and CPUs; <code>hades host status</code> shows both numbers so you never
+      budget against RAM your containers can't touch. A configurable reserve (default 20%)
+      is kept out of the allocatable pool.</p>
+      <h3>Uptime</h3>
+      <p>The daemon heartbeats to disk every 30s. On any gap it classifies the window by
+      cross-referencing the kernel boot time and <code>pmset</code> sleep history, appends it to the
+      ledger, and pushes "host back, here are the new links". <code>hades host uptime</code>
+      renders availability with causes.</p>
+      <h3>Battery</h3>
+      <p><code>hades host battery</code> reads weeks of 5-minute telemetry and answers <i>why</i>:
+      capacity trend vs design, cycle burn rate, <b>high-charge dwell</b> (the silent killer for
+      always-plugged hosts), temperature under load, and HADES' own share of CPU during the
+      window — with concrete remedies.</p>
+      <h3>Nothing untracked</h3>
+      <p>Every container carries a <code>hades.app</code> label; every cloudflared PID is registered.
+      <code>hades host ps</code> shows the full tree with live RSS. A reaper kills anything labeled
+      that desired state no longer explains — crash-orphaned processes cannot accumulate.</p>
+    </section>
+
+    <!-- ════════════════════════════ -->
+    <section id="architecture">
+      <h2><span class="n">09</span>Architecture</h2>
+      <pre><code>crates/
+├── hades-core      shared types: AppSpec, manifest, events, errors, config
+├── hades-api       the CLI⇄daemon wire contract + client
+├── hades-host      bootstrap, doctor, launchd, macOS probes (pmset/ioreg)
+├── hades-sentinel  uptime ledger, notifiers, dead-man's switch
+├── hades-runtime   Docker via bollard: build-from-tar, limits, OOM detection
+├── hades-proxy     Host-header reverse proxy: aliases, replicas, shed caps
+├── hades-tunnel    cloudflared quick tunnels: provision, scrape URL, supervise
+├── hadesd          the daemon: API, reconcile, watchdog, policy engine
+└── hades-cli       the `hades` binary</code></pre>
+      <ul>
+        <li><b>Event bus as spine.</b> Reconcile loop, watchdog, power monitor and tunnel
+        supervisor publish events; notifications, the policy engine, the JSONL ledger and
+        <code>/events</code> consume them. The policy engine is a pure function
+        (event, app states) → actions — unit-tested without Docker.</li>
+        <li><b>Tunnel topology.</b> A quick tunnel maps one hostname to one port, so each app
+        gets its own cloudflared pointed <i>at the proxy</i>, and the scraped hostname is
+        registered as an alias route. The proxy stays the single ingress.</li>
+        <li><b>Reconcile.</b> Desired state is a JSON file; on restart the daemon converges
+        reality to it — containers, routes, tunnels — and reports the downtime honestly.</li>
+      </ul>
+    </section>
+
+    <!-- ════════════════════════════ -->
+    <section id="config">
+      <h2><span class="n">10</span>Configuration</h2>
+      <p><code>~/.hades/config.toml</code>, written by <code>hades host init</code>:</p>
+      <table>
+        <tr><th>key</th><th>default</th><th>meaning</th></tr>
+        <tr><td>api_port</td><td>8786</td><td>daemon API (loopback)</td></tr>
+        <tr><td>proxy_port</td><td>8787</td><td>the ingress — local URLs are <code>&lt;app&gt;.localhost:8787</code></td></tr>
+        <tr><td>reserve_pct</td><td>20</td><td>% of VM memory kept out of the admission budget</td></tr>
+        <tr><td>heartbeat_secs</td><td>30</td><td>uptime-ledger heartbeat cadence</td></tr>
+        <tr><td>pressure_warn_mb / pressure_critical_mb</td><td>1024 / 512</td><td>available-memory thresholds for shedding</td></tr>
+        <tr><td>disk_min_free_gb</td><td>5.0</td><td>doctor red below this</td></tr>
+        <tr><td>notify.ntfy_topic</td><td>generated</td><td>your phone's push channel — keep it secret</td></tr>
+        <tr><td>notify.mac_notifications</td><td>true</td><td>also notify the local notification center</td></tr>
+        <tr><td>notify.healthchecks_url</td><td>—</td><td>dead-man's switch ping URL</td></tr>
+      </table>
+      <p>State lives under <code>~/.hades/</code>: desired state and the process registry in
+      <code>state/</code>, the uptime and event ledgers in <code>ledger/</code>, battery and resource
+      telemetry in <code>metrics/</code>, daemon logs in <code>logs/</code>.</p>
+    </section>
+
+  </article>
+</div>
+</body>
+</html>

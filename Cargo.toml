@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hades-core",
+    "crates/hades-api",
+    "crates/hades-host",
+    "crates/hades-sentinel",
+    "crates/hades-runtime",
+    "crates/hades-proxy",
+    "crates/hades-tunnel",
+    "crates/hadesd",
+    "crates/hades-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+hades-core = { path = "crates/hades-core" }
+hades-api = { path = "crates/hades-api" }
+hades-host = { path = "crates/hades-host" }
+hades-sentinel = { path = "crates/hades-sentinel" }
+hades-runtime = { path = "crates/hades-runtime" }
+hades-proxy = { path = "crates/hades-proxy" }
+hades-tunnel = { path = "crates/hades-tunnel" }
+
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["multipart"] }
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+http-body-util = "0.1"
+bollard = "0.17"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+tar = "0.4"
+flate2 = "1"
+sysinfo = "0.33"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+dirs = "5"
+futures-util = "0.3"
+tokio-stream = { version = "0.1", features = ["io-util"] }
+async-stream = "0.3"
+regex = "1"
+tokio-util = { version = "0.7", features = ["io"] }
+bytes = "1"
