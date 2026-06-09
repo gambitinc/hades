@@ -26,6 +26,7 @@ fn status_for(e: &HadesError) -> StatusCode {
     match e.code() {
         "invalid_spec" | "manifest_not_found" => StatusCode::BAD_REQUEST,
         "app_not_found" => StatusCode::NOT_FOUND,
+        "unauthorized" => StatusCode::UNAUTHORIZED,
         "admission_rejected" => StatusCode::CONFLICT,
         "doctor_red" => StatusCode::SERVICE_UNAVAILABLE,
         "daemon_unreachable" => StatusCode::BAD_GATEWAY,

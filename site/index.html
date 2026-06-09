@@ -234,8 +234,8 @@ curl -fsSL https://hades.sh/install.sh | sh</code>
         <div class="rite">
           <div class="num">2</div>
           <h3>Log in</h3>
-          <p>Connect the CLI to your host. It verifies health and tells you exactly
-          what the machine can carry.</p>
+          <p>Connect the CLI to your host — same machine, or any other via
+          <code style="border:none;background:none;padding:0;color:var(--bone)">hades host connect-info</code>.</p>
           <code>$ hades login
 <span class="g">⚖ you have entered the underworld</span>
   doctor    GREEN — ready for deploys
@@ -309,6 +309,7 @@ curl -fsSL https://hades.sh/install.sh | sh</code>
         <tr><td>4</td><td>not found</td></tr>
         <tr><td>5</td><td>daemon unreachable</td></tr>
         <tr><td>6</td><td>invalid spec</td></tr>
+        <tr><td>7</td><td>unauthorized — bad or missing token</td></tr>
       </table>
       <p class="caption-txt">The CLI is the entire interface — no MCP server, no SDK, no dashboard.
       An agent that can run a shell can operate the whole host:

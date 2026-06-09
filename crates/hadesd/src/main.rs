@@ -288,8 +288,7 @@ async fn main() {
     if d.provider.is_some() {
         let d2 = d.clone();
         tokio::spawn(async move {
-            loop {
-                let Some(provider) = d2.provider.as_ref() else { break };
+            while let Some(provider) = d2.provider.as_ref() {
                 match provider.provision("__control", d2.config.api_port).await {
                     Ok(mut tunnel) => {
                         if let Some(pid) = tunnel.pid {

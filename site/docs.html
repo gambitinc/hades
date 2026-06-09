@@ -125,14 +125,26 @@ hades host init</code></pre>
   host      127.0.0.1:8786 — hadesd v0.1.0
   doctor    GREEN — ready for deploys
   capacity  6348MB allocatable · 0MB claimed · 0 apps</code></pre>
-      <p><code>hades login</code> connects the CLI to your host, verifies the daemon is healthy
+      <p><code>hades login</code> connects the CLI to a host, verifies the daemon is healthy
       and the doctor is green, records the session in <code>~/.hades/session.json</code>, and
       reports what the machine can carry. Exit code <b>0</b> means ready; <b>2</b> means the
-      doctor is red; <b>5</b> means no daemon.</p>
-      <div class="note">Today the daemon binds loopback only, so login connects to your own
-      machine. Remote hosts over a tailnet or SSH tunnel are a planned extension —
-      the CLI⇄daemon contract is already fully network-shaped (specs and build contexts
-      travel over HTTP, never the filesystem).</div>
+      doctor is red; <b>5</b> means no daemon; <b>7</b> means bad token.</p>
+      <h3>From another machine</h3>
+      <p>The daemon binds loopback, but it publishes its own API through an authenticated
+      <b>control tunnel</b>. On the host, run:</p>
+      <pre><code>$ hades host connect-info
+
+  on the other machine, run:
+
+    hades login --host https://….trycloudflare.com --token 21c5fc74…</code></pre>
+      <p>Paste that one line on any machine with the <code>hades</code> CLI and every command —
+      <code>deploy</code>, <code>logs</code>, <code>events</code>, <code>host status</code> — operates the remote
+      host through the tunnel. Every API call requires the bearer token (the API answers
+      <b>401</b> without it); the control-tunnel URL changes when the host restarts, the token
+      does not. <code>hades logout</code> returns the CLI to the local host.</p>
+      <div class="note"><b>Treat connect-info output like a password.</b> Anyone holding the
+      token can deploy containers to your machine. Build contexts and specs travel over
+      HTTPS through the tunnel — nothing assumes a shared filesystem.</div>
     </section>
 
     <!-- ════════════════════════════ -->
@@ -204,7 +216,9 @@ PORT = "8000"</code></pre>
       <h2><span class="n">05</span>CLI reference</h2>
       <table>
         <tr><th>command</th><th>what it does</th></tr>
-        <tr><td>hades login [--host]</td><td>connect to the host, verify readiness, record the session</td></tr>
+        <tr><td>hades login [--host] [--token]</td><td>connect to a host (local or remote), verify readiness, record the session</td></tr>
+        <tr><td>hades logout</td><td>forget the session; commands target the local host again</td></tr>
+        <tr><td>hades host connect-info</td><td>print the login command another machine uses to control this host</td></tr>
         <tr><td>hades init</td><td>scaffold a Hades.toml in the current directory</td></tr>
         <tr><td>hades deploy [--app] [--dir]</td><td>idempotent upsert: build/pull, health-gate, swap routes, print the link</td></tr>
         <tr><td>hades apps list</td><td>all apps with state, replicas, memory, URLs</td></tr>
@@ -244,6 +258,7 @@ PORT = "8000"</code></pre>
         <tr><td>4</td><td>app_not_found</td><td>no such app</td></tr>
         <tr><td>5</td><td>daemon_unreachable</td><td>hadesd not running</td></tr>
         <tr><td>6</td><td>invalid_spec / manifest_not_found</td><td>fix the Hades.toml</td></tr>
+        <tr><td>7</td><td>unauthorized</td><td>missing or wrong bearer token — re-run <code>hades host connect-info</code></td></tr>
       </table>
     </section>
 
@@ -339,6 +354,7 @@ PORT = "8000"</code></pre>
         <tr><td>heartbeat_secs</td><td>30</td><td>uptime-ledger heartbeat cadence</td></tr>
         <tr><td>pressure_warn_mb / pressure_critical_mb</td><td>1024 / 512</td><td>available-memory thresholds for shedding</td></tr>
         <tr><td>disk_min_free_gb</td><td>5.0</td><td>doctor red below this</td></tr>
+        <tr><td>auth_token</td><td>generated</td><td>bearer token required on every API call — what remote logins present</td></tr>
         <tr><td>notify.ntfy_topic</td><td>generated</td><td>your phone's push channel — keep it secret</td></tr>
         <tr><td>notify.mac_notifications</td><td>true</td><td>also notify the local notification center</td></tr>
         <tr><td>notify.healthchecks_url</td><td>—</td><td>dead-man's switch ping URL</td></tr>
