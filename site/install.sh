@@ -106,6 +106,14 @@ PATH="$BIN:$PATH"
 # ── 6 · raise the host ─────────────────────────────────────────────────
 say "running hades host init (config · ntfy topic · launchd · doctor)"
 "$BIN/hades" host init || true
+# record where the source lives: `hades update` rebuilds from it and the
+# daemon serves it to fleet devices at /host/src
+CFG="$HOME/.hades/config.toml"
+# top-level TOML keys must precede any [table], so prepend rather than append
+if ! grep -qs '^source_dir' "$CFG" 2>/dev/null; then
+  { printf 'source_dir = "%s"\n' "$SRC"; cat "$CFG" 2>/dev/null; } > "$CFG.tmp" && mv "$CFG.tmp" "$CFG"
+  chmod 600 "$CFG"
+fi
 
 # ── 7 · fleet: is this machine joining the others? ─────────────────────
 # non-interactive path for rolling out many machines:

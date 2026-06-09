@@ -95,9 +95,12 @@ pub fn router(d: D) -> Router {
         .route("/host/battery", get(battery))
         .route("/host/uptime", get(uptime))
         .route("/host/ps", get(ps))
+        .route("/host/src", get(host_src))
+        .route("/host/update", post(host_update))
         .route("/fleet", get(fleet_list))
         .route("/fleet/devices", post(fleet_join))
         .route("/fleet/devices/{name}", delete(fleet_remove))
+        .route("/fleet/update", post(fleet_update))
         .route("/events", get(events))
         .route("/notify/test", post(notify_test))
         .route_layer(axum::middleware::from_fn_with_state(d.clone(), require_auth));
@@ -309,6 +312,82 @@ async fn secrets_update(
         device: None,
     })
     .into_response()
+}
+
+/// The host serves its own source so fleet devices can update from it —
+/// software shared host to host, no registry in between.
+async fn host_src(State(d): State<D>) -> Response {
+    let src = d
+        .config
+        .source_dir
+        .clone()
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.join("Cargo.toml").exists())
+        .or_else(|| {
+            let p = d.paths.root.join("src");
+            p.join("Cargo.toml").exists().then_some(p)
+        });
+    let Some(src) = src else {
+        return err_response(
+            &HadesError::Other("this host has no source to share (no source_dir)".into()),
+            None,
+        );
+    };
+    let out = tokio::process::Command::new("tar")
+        .args(["czf", "-", "--exclude", ".git", "--exclude", "target", "-C"])
+        .arg(&src)
+        .arg(".")
+        .output()
+        .await;
+    match out {
+        Ok(o) if o.status.success() => Response::builder()
+            .header("content-type", "application/gzip")
+            .body(Body::from(o.stdout))
+            .unwrap(),
+        _ => err_response(&HadesError::Other("tar failed".into()), None),
+    }
+}
+
+/// Kick off a detached self-update: the spawned `hades update` rebuilds,
+/// swaps binaries, and bounces this daemon. We answer before we die.
+async fn host_update(State(d): State<D>) -> Response {
+    let bin = d.paths.root.join("bin").join("hades");
+    let cli = if bin.exists() {
+        bin.display().to_string()
+    } else {
+        "hades".to_string()
+    };
+    let log = d.paths.logs_dir().join("update.log");
+    let cmd = format!(
+        "sleep 1; {} update >> {} 2>&1",
+        cli,
+        log.display()
+    );
+    match std::process::Command::new("sh").args(["-c", &cmd]).spawn() {
+        Ok(_) => Json(serde_json::json!({
+            "started": true,
+            "log": log.display().to_string(),
+        }))
+        .into_response(),
+        Err(e) => err_response(&HadesError::Other(format!("could not spawn update: {e}")), None),
+    }
+}
+
+/// Fan a self-update out to every joined device: the hub holds their
+/// tokens, each device pulls source back from this hub and rebuilds.
+async fn fleet_update(State(d): State<D>) -> Response {
+    let fleet = d.store.fleet_snapshot();
+    let mut results = serde_json::Map::new();
+    for dev in &fleet.devices {
+        let client =
+            hades_api::DaemonClient::for_host(&dev.control_url, Some(dev.token.clone()));
+        let r = match client.trigger_update().await {
+            Ok(v) => v,
+            Err(e) => serde_json::json!({ "started": false, "error": e.error.to_string() }),
+        };
+        results.insert(dev.name.clone(), r);
+    }
+    Json(serde_json::json!({ "devices": results })).into_response()
 }
 
 async fn fleet_join(

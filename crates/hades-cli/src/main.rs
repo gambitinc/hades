@@ -5,6 +5,7 @@
 
 mod context;
 mod render;
+mod update;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -97,6 +98,13 @@ enum Cmd {
         /// Only events from the last N days.
         #[arg(long)]
         days: Option<f64>,
+    },
+    /// Update hades on this machine: refresh source (checkout > git >
+    /// your hub > --from), rebuild, swap binaries, restart the daemon.
+    Update {
+        /// A hades site URL to pull source from (e.g. the gates app).
+        #[arg(long)]
+        from: Option<String>,
     },
     /// Notification utilities.
     Notify {
@@ -202,6 +210,9 @@ enum FleetCmd {
     Add,
     /// Remove a device from the fleet (its apps keep running on it).
     Remove { name: String },
+    /// Tell every joined device to self-update (each pulls source from
+    /// this hub, rebuilds, and restarts its daemon).
+    Update,
 }
 
 #[derive(Subcommand)]
@@ -295,6 +306,32 @@ async fn main() -> ExitCode {
             }
             Err(e) => fail(e, json),
         },
+        Cmd::Update { from } => {
+            match update::run(from, |msg| eprintln!("  ◆ {msg}")).await {
+                Ok(o) => {
+                    if json {
+                        render::json(&serde_json::json!({
+                            "updated": true, "source": o.source,
+                            "old_version": o.old_version, "new_version": o.new_version,
+                            "daemon_restarted": o.daemon_restarted,
+                        }));
+                    } else {
+                        println!();
+                        println!(
+                            "  updated from {} — v{} → v{}",
+                            o.source,
+                            o.old_version.unwrap_or_else(|| "?".into()),
+                            o.new_version
+                        );
+                        if !o.daemon_restarted {
+                            println!("  daemon did not come back by itself — start hadesd (or check launchd)");
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e, json),
+            }
+        }
         Cmd::Events { follow, days } => stream_events(follow, days, json).await,
         Cmd::Notify { cmd: NotifyCmd::Test } => match client().notify_test().await {
             Ok(r) => {
@@ -927,6 +964,31 @@ async fn fleet_cmd(cmd: FleetCmd, json: bool) -> ExitCode {
                     render::json(&view);
                 } else {
                     println!("{name} removed from the fleet (its apps keep running there)");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e, json),
+        },
+        FleetCmd::Update => match c.fleet_update().await {
+            Ok(v) => {
+                if json {
+                    render::json(&v);
+                } else {
+                    let empty = serde_json::Map::new();
+                    let devices = v["devices"].as_object().unwrap_or(&empty);
+                    if devices.is_empty() {
+                        println!("no devices to update");
+                    } else {
+                        for (name, r) in devices {
+                            if r["started"].as_bool().unwrap_or(false) {
+                                println!("{name}: updating (rebuild + daemon restart; takes a few minutes)");
+                            } else {
+                                println!("{name}: failed — {}", r["error"].as_str().unwrap_or("?"));
+                            }
+                        }
+                        println!();
+                        println!("watch a device come back with `hades fleet`");
+                    }
                 }
                 ExitCode::SUCCESS
             }

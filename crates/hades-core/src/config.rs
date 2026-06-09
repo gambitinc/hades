@@ -24,6 +24,10 @@ pub struct HadesConfig {
     /// init (or by the daemon on first start) — this is what `hades login
     /// --token` presents from another machine.
     pub auth_token: Option<String>,
+    /// Where this host's hades source lives (set by the installer). Serves
+    /// two purposes: `hades update` rebuilds from it, and the daemon offers
+    /// it to fleet devices at GET /host/src so updates propagate hub→device.
+    pub source_dir: Option<String>,
     pub notify: NotifyConfig,
     pub fleet: FleetConfig,
 }
@@ -60,6 +64,7 @@ impl Default for HadesConfig {
             pressure_critical_mb: 512,
             disk_min_free_gb: 5.0,
             auth_token: None,
+            source_dir: None,
             notify: NotifyConfig::default(),
             fleet: FleetConfig::default(),
         }

@@ -258,6 +258,46 @@ impl DaemonClient {
         .await
     }
 
+    /// Download this host's source tarball (for hub→device updates).
+    pub async fn fetch_src(&self) -> Result<Vec<u8>, ApiError> {
+        let resp = self
+            .auth(self.http.get(format!("{}/host/src", self.base)))
+            .timeout(std::time::Duration::from_secs(120))
+            .send()
+            .await
+            .map_err(|e| ApiError::from(HadesError::DaemonUnreachable(e.to_string())))?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(serde_json::from_str::<ErrorBody>(&body)
+                .map(ApiError::from)
+                .unwrap_or_else(|_| ApiError::from(HadesError::Other(body))));
+        }
+        resp.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| ApiError::from(HadesError::Other(e.to_string())))
+    }
+
+    /// Hub-side fan-out: every joined device self-updates from this hub.
+    pub async fn fleet_update(&self) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/fleet/update", self.base)))
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    /// Ask a host to update itself (detached; it rebuilds and restarts).
+    pub async fn trigger_update(&self) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/host/update", self.base)))
+                .send()
+                .await,
+        )
+        .await
+    }
+
     pub async fn notify_test(&self) -> Result<NotifyTestResponse, ApiError> {
         Self::check(
             self.auth(self.http.post(format!("{}/notify/test", self.base)))

@@ -267,6 +267,13 @@ macbook    green     4121MB    6348MB      1      14:02:13
 $ hades deploy --device studio    <span class="c"># pin placement</span>
 $ hades deploy --device local     <span class="c"># force the hub itself</span>
 $ hades fleet remove macbook      <span class="c"># apps keep running there</span></code></pre>
+      <h3>Updating the fleet</h3>
+      <p>Hosts serve their own source (<code>GET /host/src</code>), so updates
+      propagate the same way everything else does: machine to machine. Update
+      the hub (<code>hades update</code> — it rebuilds from its checkout, git,
+      or <code>--from</code> a site URL), then <code>hades fleet update</code>:
+      every device pulls source from the hub, rebuilds, swaps binaries, and
+      restarts its daemon. No registry, no release server.</p>
       <p><code>hades apps list</code> shows a DEVICE column; logs, stats,
       pause/resume and destroy are proxied through the hub to wherever the
       app lives. Request-level balancing of one app across several devices
@@ -288,6 +295,8 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
         <tr><td>hades fleet [list]</td><td>devices with live health and free capacity</td></tr>
         <tr><td>hades fleet add</td><td>print what to run on a new machine</td></tr>
         <tr><td>hades fleet remove &lt;name&gt;</td><td>drop a device from the registry</td></tr>
+        <tr><td>hades update [--from &lt;url&gt;]</td><td>self-update: refresh source (checkout › git › your hub › --from), rebuild, swap binaries, restart the daemon</td></tr>
+        <tr><td>hades fleet update</td><td>every joined device self-updates, pulling source from this hub</td></tr>
         <tr><td>hades init</td><td>scaffold a Hades.toml in the current directory</td></tr>
         <tr><td>hades deploy [--app] [--dir] [--device]</td><td>idempotent upsert: build/pull, health-gate, swap routes, print the link</td></tr>
         <tr><td>hades apps list</td><td>all apps with state, replicas, memory, URLs</td></tr>
@@ -428,6 +437,7 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
         <tr><td>notify.mac_notifications</td><td>true</td><td>also notify the local notification center</td></tr>
         <tr><td>notify.healthchecks_url</td><td>—</td><td>dead-man's switch ping URL</td></tr>
         <tr><td>fleet.hub_url / fleet.hub_token</td><td>—</td><td>written by <code>hades host join</code>: which hub owns this device</td></tr>
+        <tr><td>source_dir</td><td>set by installer</td><td>where this host's source lives — rebuilt by <code>hades update</code>, served to devices at /host/src</td></tr>
       </table>
       <p>State lives under <code>~/.hades/</code>: desired state and the process registry in
       <code>state/</code>, the uptime and event ledgers in <code>ledger/</code>, battery and resource

@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "hades-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "futures-util",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "hades-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "clap",
@@ -740,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "hades-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "hades-host"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "hades-core",
@@ -768,7 +768,7 @@ dependencies = [
 
 [[package]]
 name = "hades-proxy"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hades-core",
  "http-body-util",
@@ -780,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "hades-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bollard",
  "bytes",
@@ -796,7 +796,7 @@ dependencies = [
 
 [[package]]
 name = "hades-sentinel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "hades-core",
@@ -809,7 +809,7 @@ dependencies = [
 
 [[package]]
 name = "hades-tunnel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hades-core",
  "regex",
@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "hadesd"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-stream",
  "axum",
