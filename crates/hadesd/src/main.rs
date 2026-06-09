@@ -30,6 +30,16 @@ use hades_tunnel::QuickTunnelProvider;
 use crate::daemon::Daemon;
 use crate::state::Store;
 
+fn short_hostname() -> String {
+    std::process::Command::new("hostname")
+        .arg("-s")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "device".into())
+}
+
 fn generate_token() -> String {
     // 32 bytes of OS randomness, hex-encoded, no extra deps
     let mut buf = [0u8; 32];
@@ -303,6 +313,28 @@ async fn main() {
                         }
                         *d2.control_url.lock().unwrap() = Some(tunnel.url.clone());
                         tracing::info!("control tunnel up: {}", tunnel.url);
+                        // fleet self-heal: our URL just changed, so tell the
+                        // hub where we live now (join is an upsert by name)
+                        if let (Some(hub), Some(hub_tok), Some(own_tok)) = (
+                            d2.config.fleet.hub_url.clone(),
+                            d2.config.fleet.hub_token.clone(),
+                            d2.config.auth_token.clone(),
+                        ) {
+                            let req = hades_api::types::JoinRequest {
+                                name: short_hostname(),
+                                control_url: tunnel.url.clone(),
+                                token: own_tok,
+                            };
+                            let hub_client =
+                                hades_api::DaemonClient::for_host(&hub, Some(hub_tok));
+                            match hub_client.join(&req).await {
+                                Ok(_) => tracing::info!("re-registered with hub {hub}"),
+                                Err(e) => tracing::warn!(
+                                    "hub re-register failed (stale hub URL? re-run `hades host join`): {}",
+                                    e.error
+                                ),
+                            }
+                        }
                         tunnel.wait().await;
                         *d2.control_url.lock().unwrap() = None;
                         d2.store.update_registry(|r| {
