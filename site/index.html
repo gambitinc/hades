@@ -33,7 +33,7 @@
 
   /* ── the film ─────────────────────────────────────────── */
   #gl { position: fixed; inset: 0; z-index: 0; display: block; }
-  #cinema { height: 420vh; position: relative; }
+  #cinema { height: 240vh; position: relative; }
   body.no3d #cinema { height: 100vh; }
   body.no3d #gl { display:none; }
   body.no3d #cinema::before {
@@ -54,18 +54,24 @@
     line-height: 1; letter-spacing: .42em;
     margin-left: .42em; /* optically recenter tracked text */
     color: var(--bone);
-    text-shadow: 0 0 70px rgba(210,74,30,.3);
+    text-shadow: 0 2px 34px rgba(0,0,0,.9), 0 0 70px rgba(210,74,30,.25);
+  }
+  #title > div {
+    padding: 64px 90px;
+    background: radial-gradient(58% 58% at 50% 46%, rgba(7,5,4,.62), transparent 72%);
   }
   #title .expand {
     margin-top: 30px;
-    font-size: 11.5px; letter-spacing: .42em; text-transform: uppercase;
-    color: var(--smoke); word-spacing: .6em;
+    font-size: 12px; letter-spacing: .42em; text-transform: uppercase;
+    color: var(--bone); word-spacing: .6em;
+    text-shadow: 0 1px 26px rgba(0,0,0,.95);
   }
   #title .expand b { color: var(--gold); font-weight: 400; }
   #title .one-liner {
     margin-top: 14px;
     font-size: 11px; letter-spacing: .3em; text-transform: uppercase;
-    color: var(--smoke);
+    color: var(--bone); opacity: .72;
+    text-shadow: 0 1px 26px rgba(0,0,0,.95);
   }
   #cue {
     position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
@@ -74,18 +80,6 @@
     animation: pulse 2.6s ease-in-out infinite; pointer-events: none;
   }
   @keyframes pulse { 0%,100% { opacity:.25 } 50% { opacity:.9 } }
-  .caption {
-    position: fixed; inset: 0; z-index: 2;
-    display: grid; place-items: center; text-align: center;
-    pointer-events: none; opacity: 0;
-  }
-  .caption p {
-    font-size: clamp(13px, 1.5vw, 17px); color: var(--bone);
-    letter-spacing: .34em; text-transform: uppercase;
-    max-width: 44ch; line-height: 2.1;
-    text-shadow: 0 2px 40px rgba(0,0,0,.9);
-  }
-  .caption p b { color: var(--gold); font-weight: 400; }
 
   /* ── nav ──────────────────────────────────────────────── */
   header {
@@ -201,8 +195,6 @@
   </div>
 </div>
 <div id="cue">scroll</div>
-<div class="caption" id="cap1"><p>A personal cloud, carved from the<br>machine you <b>already own</b>.</p></div>
-<div class="caption" id="cap2"><p>The host knows its own limits —<br><b>every claim is weighed</b>.</p></div>
 
 <!-- the shore on the other side -->
 <main id="content">
@@ -520,8 +512,6 @@ if (renderer) {
   const cinema = document.getElementById('cinema');
   const titleEl = document.getElementById('title');
   const cueEl = document.getElementById('cue');
-  const cap1 = document.getElementById('cap1');
-  const cap2 = document.getElementById('cap2');
   const hdr = document.getElementById('hdr');
 
   const sstep = (a, b, x) => { const t = Math.min(Math.max((x-a)/(b-a), 0), 1); return t*t*(3-2*t); };
@@ -550,9 +540,9 @@ if (renderer) {
     const t = clock.getElapsedTime();
     const p = progress;
 
-    const approach = sstep(0.00, 0.45, p);   // drift forward
-    const storm    = sstep(0.30, 0.80, p);   // the sea rises
-    const through  = sstep(0.82, 1.00, p);   // into the dark
+    const approach = sstep(0.00, 0.55, p);   // drift forward
+    const storm    = sstep(0.20, 0.72, p);   // the sea rises
+    const through  = sstep(0.70, 1.00, p);   // into the dark
 
     seaUniforms.uTime.value = t;
     seaUniforms.uStorm.value = storm;
@@ -570,11 +560,9 @@ if (renderer) {
     renderer.toneMappingExposure = 0.95 + 0.12*storm - 0.7*through;
     bloom.strength = 0.45 + 0.35*storm - 0.3*through;
 
-    titleEl.style.opacity = String(1 - sstep(0.04, 0.20, p));
-    titleEl.style.transform = `translateY(${-40*sstep(0.04,0.20,p)}px)`;
+    titleEl.style.opacity = String(1 - sstep(0.05, 0.26, p));
+    titleEl.style.transform = `translateY(${-40*sstep(0.05,0.26,p)}px)`;
     cueEl.style.opacity = String((1 - sstep(0.02, 0.07, p)) * 0.9);
-    cap1.style.opacity = String(sstep(0.26, 0.36, p) * (1 - sstep(0.50, 0.60, p)));
-    cap2.style.opacity = String(sstep(0.62, 0.72, p) * (1 - sstep(0.86, 0.94, p)));
 
     composer.render();
   }
