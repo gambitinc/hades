@@ -950,12 +950,15 @@ async fn fleet_cmd(cmd: FleetCmd, json: bool) -> ExitCode {
                     }));
                 } else {
                     println!();
-                    println!("  on the new machine:");
+                    println!("  on the new machine, one line does everything:");
                     println!();
-                    println!("    1. install hades (the site's install script), then:");
-                    println!("    2. hades host join --hub {url} --token {token}");
+                    println!("    curl -fsSL <site>/install.sh | HADES_HUB={url} HADES_TOKEN={token} sh");
                     println!();
-                    println!("  the installer also offers this step interactively.");
+                    println!("  or, if hades is already installed there:");
+                    println!();
+                    println!("    hades host join --hub {url} --token {token}");
+                    println!();
+                    println!("  the URL rotates when this hub restarts; the token does not.");
                 }
                 ExitCode::SUCCESS
             }

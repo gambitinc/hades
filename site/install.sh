@@ -108,8 +108,17 @@ say "running hades host init (config · ntfy topic · launchd · doctor)"
 "$BIN/hades" host init || true
 
 # ── 7 · fleet: is this machine joining the others? ─────────────────────
+# non-interactive path for rolling out many machines:
+#   curl -fsSL …/install.sh | HADES_HUB=<url> HADES_TOKEN=<token> sh
+if [ -n "${HADES_HUB:-}" ] && [ -n "${HADES_TOKEN:-}" ]; then
+  say "joining the fleet at $HADES_HUB"
+  i=0
+  until "$BIN/hades" host join --hub "$HADES_HUB" --token "$HADES_TOKEN" 2>/dev/null; do
+    i=$((i+1)); [ $i -gt 6 ] && { note "join didn't go through — run later: hades host join --hub $HADES_HUB --token <token>"; break; }
+    sleep 5
+  done
 # /dev/tty so the prompt works even though stdin is the curl pipe
-if [ -e /dev/tty ]; then
+elif [ -e /dev/tty ]; then
   printf "\n  ${BONE}already running hades on another machine?${OFF}\n"
   printf "  ${DIM}paste its connect line (from \`hades host connect-info\` there)\n"
   printf "  to add this device to your fleet — or press Enter to make this\n"
