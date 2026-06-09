@@ -57,8 +57,8 @@
     text-shadow: 0 2px 34px rgba(0,0,0,.9), 0 0 70px rgba(210,74,30,.25);
   }
   #title > div {
-    padding: 64px 90px;
-    background: radial-gradient(58% 58% at 50% 46%, rgba(7,5,4,.62), transparent 72%);
+    padding: 56px 110px;
+    background: radial-gradient(60% 60% at 50% 50%, rgba(7,5,4,.5), transparent 72%);
   }
   #title .expand {
     margin-top: 30px;
@@ -114,6 +114,13 @@
   }
   .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
   section { padding: 84px 0; border-bottom: 1px solid var(--line); }
+  .acronym {
+    padding: 56px 0 0;
+    font-size: 12px; letter-spacing: .3em; text-transform: uppercase;
+    color: var(--smoke);
+  }
+  .acronym b { color: var(--bone); font-weight: 400; }
+  .acronym .g { color: var(--gold); }
   .rubric { display:flex; align-items:baseline; gap:16px; margin-bottom:30px; }
   .rubric .n { color:var(--gold); font-size:12px; min-width:32px; letter-spacing:.1em; }
   .rubric h2 { font-size:12px; font-weight:400; letter-spacing:.38em; text-transform:uppercase; }
@@ -190,8 +197,6 @@
 <div class="overlay" id="title">
   <div>
     <h1>HADES</h1>
-    <p class="expand"><b>H</b>ost-<b>A</b>ware <b>D</b>eployment &amp; <b>E</b>xecution <b>S</b>ystem</p>
-    <p class="one-liner">your hardware. a real cloud.</p>
   </div>
 </div>
 <div id="cue">scroll</div>
@@ -199,6 +204,8 @@
 <!-- the shore on the other side -->
 <main id="content">
   <div class="wrap">
+
+    <p class="acronym"><b>HADES</b> — <span class="g">H</span>ost-<span class="g">A</span>ware <span class="g">D</span>eployment &amp; <span class="g">E</span>xecution <span class="g">S</span>ystem. Your hardware. A real cloud.</p>
 
     <section id="install">
       <div class="rubric"><span class="n">01</span><h2>Install</h2><div class="rule"></div></div>
