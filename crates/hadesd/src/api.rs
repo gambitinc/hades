@@ -88,6 +88,7 @@ pub fn router(d: D) -> Router {
         .route("/apps/{name}", delete(destroy))
         .route("/apps/{name}/logs", get(logs))
         .route("/apps/{name}/stats", get(stats))
+        .route("/apps/{name}/secrets", get(secrets_list).put(secrets_update))
         .route("/apps/{name}/pause", post(pause))
         .route("/apps/{name}/resume", post(resume))
         .route("/host", get(host_status))
@@ -245,6 +246,69 @@ async fn resume(State(d): State<D>, Path(name): Path<String>) -> Response {
         Ok(info) => Json(info).into_response(),
         Err(e) => err_response(&e, None),
     }
+}
+
+async fn secrets_list(State(d): State<D>, Path(name): Path<String>) -> Response {
+    if let Some((dev, client)) = remote_for(&d, &name) {
+        return match client.secrets_list(&name).await {
+            Ok(mut v) => {
+                v.device = Some(dev);
+                Json(v).into_response()
+            }
+            Err(e) => err_response(&e.error, None),
+        };
+    }
+    let map = d.secrets.load(&name);
+    Json(SecretsView {
+        app: name,
+        keys: map.keys().cloned().collect(),
+        encrypted: d.secrets.encrypted(),
+        applied: false,
+        device: None,
+    })
+    .into_response()
+}
+
+async fn secrets_update(
+    State(d): State<D>,
+    Path(name): Path<String>,
+    Json(update): Json<SecretsUpdate>,
+) -> Response {
+    if let Some((dev, client)) = remote_for(&d, &name) {
+        return match client.secrets_update(&name, &update).await {
+            Ok(mut v) => {
+                v.device = Some(dev);
+                Json(v).into_response()
+            }
+            Err(e) => err_response(&e.error, None),
+        };
+    }
+    let mut map = d.secrets.load(&name);
+    for (k, v) in &update.set {
+        map.insert(k.clone(), v.clone());
+    }
+    for k in &update.unset {
+        map.remove(k);
+    }
+    if let Err(e) = d.secrets.save(&name, &map) {
+        return err_response(&e, None);
+    }
+    // running replicas restart so the change is real, not pending
+    let applied = match d.redeploy_in_place(&name).await {
+        Ok(()) => d.store.get(&name).is_some(),
+        Err(e) => {
+            tracing::warn!(app = %name, "secret apply restart failed: {e}");
+            false
+        }
+    };
+    Json(SecretsView {
+        app: name,
+        keys: map.keys().cloned().collect(),
+        encrypted: d.secrets.encrypted(),
+        applied,
+        device: None,
+    })
+    .into_response()
 }
 
 async fn fleet_join(

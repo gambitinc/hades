@@ -213,6 +213,29 @@ pub struct FleetView {
     pub devices: Vec<FleetDeviceView>,
 }
 
+/// Set/unset secrets for one app. Values are write-only: they go in here
+/// and never come back out of any endpoint.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SecretsUpdate {
+    #[serde(default)]
+    pub set: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub unset: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretsView {
+    pub app: String,
+    /// Key names only — values never leave the host.
+    pub keys: Vec<String>,
+    /// Whether the store is keychain-encrypted at rest on that host.
+    pub encrypted: bool,
+    /// True when running replicas were restarted to pick the change up.
+    pub applied: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub ok: bool,

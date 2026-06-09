@@ -68,6 +68,20 @@ impl HadesPaths {
         ] {
             std::fs::create_dir_all(d)?;
         }
+        // credentials live under here (config, sessions, fleet tokens) —
+        // tighten pre-existing files too, not just future writes
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.root, std::fs::Permissions::from_mode(0o700));
+            let _ =
+                std::fs::set_permissions(self.state_dir(), std::fs::Permissions::from_mode(0o700));
+            for f in [self.config(), self.root.join("session.json")] {
+                if f.exists() {
+                    let _ = std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600));
+                }
+            }
+        }
         Ok(())
     }
 }

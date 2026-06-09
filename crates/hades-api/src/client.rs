@@ -235,6 +235,29 @@ impl DaemonClient {
         Self::check(self.auth(self.http.get(format!("{}/host/ps", self.base))).send().await).await
     }
 
+    pub async fn secrets_update(
+        &self,
+        app: &str,
+        update: &SecretsUpdate,
+    ) -> Result<SecretsView, ApiError> {
+        Self::check(
+            self.auth(self.http.put(format!("{}/apps/{app}/secrets", self.base)))
+                .json(update)
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    pub async fn secrets_list(&self, app: &str) -> Result<SecretsView, ApiError> {
+        Self::check(
+            self.auth(self.http.get(format!("{}/apps/{app}/secrets", self.base)))
+                .send()
+                .await,
+        )
+        .await
+    }
+
     pub async fn notify_test(&self) -> Result<NotifyTestResponse, ApiError> {
         Self::check(
             self.auth(self.http.post(format!("{}/notify/test", self.base)))

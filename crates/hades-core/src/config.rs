@@ -91,6 +91,12 @@ impl HadesConfig {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(path, toml::to_string_pretty(self).expect("config serializes"))?;
+        // the auth token lives in here
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
         Ok(())
     }
 }

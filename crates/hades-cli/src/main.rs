@@ -74,6 +74,13 @@ enum Cmd {
         #[command(subcommand)]
         cmd: AppsCmd,
     },
+    /// Per-app secrets: set on the host that runs the app, injected as env
+    /// at container start. Never in the manifest, never in git, never
+    /// echoed back. Running apps restart to pick changes up.
+    Secrets {
+        #[command(subcommand)]
+        cmd: SecretsCmd,
+    },
     /// Your devices: list them, add one, remove one. Deploys are placed on
     /// whichever device has the most free memory.
     Fleet {
@@ -163,6 +170,31 @@ enum AppsCmd {
 }
 
 #[derive(Subcommand)]
+enum SecretsCmd {
+    /// Set one or more KEY=VALUE pairs.
+    Set {
+        /// KEY=VALUE pairs.
+        #[arg(required = true)]
+        pairs: Vec<String>,
+        /// App name (default: the Hades.toml in this directory).
+        #[arg(long)]
+        app: Option<String>,
+    },
+    /// List secret KEY names (values never come back).
+    List {
+        #[arg(long)]
+        app: Option<String>,
+    },
+    /// Remove keys.
+    Unset {
+        #[arg(required = true)]
+        keys: Vec<String>,
+        #[arg(long)]
+        app: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum FleetCmd {
     /// List devices with live capacity (default).
     List,
@@ -242,6 +274,7 @@ async fn main() -> ExitCode {
         Cmd::Init => scaffold_manifest(json),
         Cmd::Deploy { app, dir, device } => deploy(app, dir, device, json).await,
         Cmd::Apps { cmd } => apps_cmd(cmd, json).await,
+        Cmd::Secrets { cmd } => secrets_cmd(cmd, json).await,
         Cmd::Fleet { cmd } => fleet_cmd(cmd.unwrap_or(FleetCmd::List), json).await,
         Cmd::Url { name } => match client().get_app(&name).await {
             Ok(info) => {
@@ -288,6 +321,15 @@ async fn login(host: Option<String>, token: Option<String>, json: bool) -> ExitC
     let host = host.unwrap_or_else(|| format!("127.0.0.1:{}", config.api_port));
     // local logins read the token straight off the machine; remote ones
     // must present it
+    // `--token -` reads from stdin so the secret stays out of shell history
+    let token = match token.as_deref() {
+        Some("-") => {
+            let mut line = String::new();
+            let _ = std::io::stdin().read_line(&mut line);
+            Some(line.trim().to_string()).filter(|t| !t.is_empty())
+        }
+        _ => token,
+    };
     let token = token.or_else(|| {
         if is_remote { None } else { config.auth_token.clone() }
     });
@@ -759,6 +801,107 @@ async fn apps_cmd(cmd: AppsCmd, json: bool) -> ExitCode {
             }
             Err(e) => fail(e, json),
         },
+    }
+}
+
+fn app_or_manifest(app: Option<String>) -> Result<String, HadesError> {
+    if let Some(a) = app {
+        return Ok(a);
+    }
+    let dir = std::env::current_dir().map_err(|e| HadesError::Other(e.to_string()))?;
+    Manifest::load(&dir)
+        .map(|(m, _)| m.app.name)
+        .map_err(|_| {
+            HadesError::Other("no --app given and no Hades.toml here".into())
+        })
+}
+
+fn render_secrets(v: &hades_api::types::SecretsView) {
+    let where_ = v.device.as_deref().unwrap_or("local");
+    println!(
+        "{} — {} secret{} on {} ({}){}",
+        v.app,
+        v.keys.len(),
+        if v.keys.len() == 1 { "" } else { "s" },
+        where_,
+        if v.encrypted { "keychain-encrypted" } else { "file permissions only" },
+        if v.applied { " · running replicas restarted" } else { "" },
+    );
+    for k in &v.keys {
+        println!("  {k}");
+    }
+}
+
+async fn secrets_cmd(cmd: SecretsCmd, json: bool) -> ExitCode {
+    let c = client();
+    match cmd {
+        SecretsCmd::Set { pairs, app } => {
+            let app = match app_or_manifest(app) {
+                Ok(a) => a,
+                Err(e) => return fail(e, json),
+            };
+            let mut update = hades_api::types::SecretsUpdate::default();
+            for pair in &pairs {
+                let Some((k, v)) = pair.split_once('=') else {
+                    return fail(
+                        HadesError::InvalidSpec(format!("'{pair}' is not KEY=VALUE")),
+                        json,
+                    );
+                };
+                update.set.insert(k.trim().to_string(), v.to_string());
+            }
+            match c.secrets_update(&app, &update).await {
+                Ok(v) => {
+                    if json {
+                        render::json(&v);
+                    } else {
+                        render_secrets(&v);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e, json),
+            }
+        }
+        SecretsCmd::List { app } => {
+            let app = match app_or_manifest(app) {
+                Ok(a) => a,
+                Err(e) => return fail(e, json),
+            };
+            match c.secrets_list(&app).await {
+                Ok(v) => {
+                    if json {
+                        render::json(&v);
+                    } else if v.keys.is_empty() {
+                        println!("{app} has no secrets — `hades secrets set KEY=VALUE --app {app}`");
+                    } else {
+                        render_secrets(&v);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e, json),
+            }
+        }
+        SecretsCmd::Unset { keys, app } => {
+            let app = match app_or_manifest(app) {
+                Ok(a) => a,
+                Err(e) => return fail(e, json),
+            };
+            let update = hades_api::types::SecretsUpdate {
+                set: Default::default(),
+                unset: keys,
+            };
+            match c.secrets_update(&app, &update).await {
+                Ok(v) => {
+                    if json {
+                        render::json(&v);
+                    } else {
+                        render_secrets(&v);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e, json),
+            }
+        }
     }
 }
 

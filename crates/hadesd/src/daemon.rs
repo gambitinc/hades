@@ -43,6 +43,8 @@ pub struct Daemon {
     pub http: reqwest::Client,
     /// Last-known health/capacity of each fleet device (poller cache).
     pub fleet_status: Mutex<crate::fleet::FleetStatusMap>,
+    /// Per-app secret store (keychain-encrypted where available).
+    pub secrets: crate::secrets::SecretStore,
 }
 
 impl Daemon {
@@ -234,14 +236,16 @@ impl Daemon {
             .map(|r| r.replicas.clone())
             .unwrap_or_default();
 
-        // start new replicas on fresh ports (old ones keep serving)
+        // start new replicas on fresh ports (old ones keep serving);
+        // secrets ride in at this moment only
+        let launch_spec = self.spec_with_secrets(&spec);
         let mut new_replicas = Vec::new();
         for i in 0..spec.replicas {
             let port = Runtime::free_host_port().map_err(|e| (e, None))?;
             // replica indices offset by generation so names never collide
             // with still-running old containers
             let idx = if replaced { 100 + i } else { i };
-            match self.runtime.run_replica(&spec, &image, idx, port).await {
+            match self.runtime.run_replica(&launch_spec, &image, idx, port).await {
                 Ok(h) => new_replicas.push(ReplicaRecord {
                     container_id: h.container_id,
                     host_port: h.host_port,
@@ -351,6 +355,76 @@ impl Daemon {
                 }
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
+        }
+        Ok(())
+    }
+
+    /// The spec as the container actually sees it: manifest env with the
+    /// app's secrets merged over the top. Secrets exist only at this
+    /// boundary — the persisted spec never contains them.
+    pub fn spec_with_secrets(&self, spec: &AppSpec) -> AppSpec {
+        let mut s = spec.clone();
+        for (k, v) in self.secrets.load(&spec.name) {
+            s.env.insert(k, v);
+        }
+        s
+    }
+
+    /// Roll an app's replicas in place (same spec & image, fresh env):
+    /// start new, health-gate, swap routes, retire old. Used when secrets
+    /// change so the containers actually pick them up.
+    pub async fn redeploy_in_place(&self, name: &str) -> Result<(), HadesError> {
+        let rec = self
+            .store
+            .get(name)
+            .ok_or_else(|| HadesError::AppNotFound(name.into()))?;
+        if rec.state != AppState::Running {
+            return Ok(()); // paused/crash-looped apps pick secrets up later
+        }
+        let image = if rec.spec.build.is_some() {
+            Runtime::image_tag(name)
+        } else {
+            rec.spec.image.clone().unwrap_or_default()
+        };
+        let launch_spec = self.spec_with_secrets(&rec.spec);
+        let old = rec.replicas.clone();
+        let mut fresh = Vec::new();
+        for i in 0..rec.spec.replicas {
+            let port = Runtime::free_host_port()?;
+            match self
+                .runtime
+                .run_replica(&launch_spec, &image, 150 + i, port)
+                .await
+            {
+                Ok(h) => fresh.push(ReplicaRecord {
+                    container_id: h.container_id,
+                    host_port: h.host_port,
+                }),
+                Err(e) => {
+                    for r in &fresh {
+                        let _ = self.runtime.stop_remove(&r.container_id).await;
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        if let Err(e) = self.wait_ready(&rec.spec, &fresh).await {
+            for r in &fresh {
+                let _ = self.runtime.stop_remove(&r.container_id).await;
+            }
+            return Err(e);
+        }
+        let rec = self.store.update(|apps| {
+            apps.get_mut(name).map(|r| {
+                r.replicas = fresh.clone();
+                r.clone()
+            })
+        });
+        if let Some(rec) = rec {
+            self.install_routes(&rec);
+        }
+        for r in &old {
+            let _ = self.runtime.stop_remove(&r.container_id).await;
         }
         Ok(())
     }
@@ -487,6 +561,7 @@ impl Daemon {
         self.store.update_registry(|reg| {
             reg.cloudflared.remove(name);
         });
+        self.secrets.remove(name);
         self.emit(HostEvent::AppDestroyed { app: name.into() });
         let mut info = self.app_info(&rec);
         info.state = AppState::Stopped;
@@ -553,6 +628,12 @@ impl Daemon {
     // ----- views -----
 
     pub fn app_info(&self, rec: &AppRecord) -> AppInfo {
+        // env values are config the user typed into a manifest, but they
+        // still don't belong in API responses, logs, or agent transcripts
+        let mut spec = rec.spec.clone();
+        for v in spec.env.values_mut() {
+            *v = "•••".into();
+        }
         AppInfo {
             name: rec.spec.name.clone(),
             state: rec.state,
@@ -570,7 +651,7 @@ impl Daemon {
             memory_mb: rec.spec.resources.memory_mb,
             cpu: rec.spec.resources.cpu,
             created_at: rec.created_at,
-            spec: rec.spec.clone(),
+            spec,
         }
     }
 
@@ -601,11 +682,12 @@ impl Daemon {
                 } else {
                     rec.spec.image.clone().unwrap_or_default()
                 };
+                let launch_spec = self.spec_with_secrets(&rec.spec);
                 for i in alive.len()..rec.spec.replicas as usize {
                     if let Ok(port) = Runtime::free_host_port() {
                         if let Ok(h) = self
                             .runtime
-                            .run_replica(&rec.spec, &image, 200 + i as u8, port)
+                            .run_replica(&launch_spec, &image, 200 + i as u8, port)
                             .await
                         {
                             alive.push(ReplicaRecord {

@@ -8,6 +8,7 @@ mod fleet;
 mod policy;
 mod power;
 mod reports;
+mod secrets;
 mod state;
 mod watchdog;
 
@@ -127,6 +128,7 @@ async fn main() {
         pressure: Mutex::new(PressureLevel::Normal),
         http: reqwest::Client::new(),
         fleet_status: Mutex::new(Default::default()),
+        secrets: secrets::SecretStore::open(&paths.root),
         runtime,
         bus: bus.clone(),
         config: config.clone(),
