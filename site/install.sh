@@ -28,14 +28,18 @@ SRC="${HADES_SRC:-$HOME/.hades/src}"
 if [ -f "./Cargo.toml" ] && grep -q 'hades-cli' ./Cargo.toml 2>/dev/null; then
   SRC="$(pwd)"
   say "using this checkout: $SRC"
-elif [ -d "$SRC/.git" ] || [ -f "$SRC/Cargo.toml" ]; then
-  say "updating sources in $SRC"
+elif [ -d "$SRC/.git" ]; then
+  say "git pull in $SRC"
   (cd "$SRC" && git pull --ff-only >/dev/null 2>&1 || true)
 elif [ "${ORIGIN#__}" = "$ORIGIN" ] && curl -fsSL "$ORIGIN/hades-src.tar.gz" -o /tmp/hades-src.tar.gz 2>/dev/null; then
+  # fresh tarball every run — re-running this script IS the update path
   say "fetching sources from $ORIGIN (the host serves its own source)"
+  [ "$SRC" = "$HOME/.hades/src" ] && rm -rf "$SRC"
   mkdir -p "$SRC"
   tar xzf /tmp/hades-src.tar.gz -C "$SRC" --strip-components 1
   rm -f /tmp/hades-src.tar.gz
+elif [ -f "$SRC/Cargo.toml" ]; then
+  note "offline: rebuilding the sources already in $SRC"
 else
   command -v git >/dev/null 2>&1 || die "git not found — install Xcode CLT: xcode-select --install"
   say "cloning $REPO"
