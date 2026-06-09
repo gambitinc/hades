@@ -123,45 +123,66 @@
   header.on nav.links a:nth-child(2) { transition-delay: .45s, .45s, 0s; }
   nav.links a:hover { color: var(--gold); }
 
-  /* ── the essay ── */
+  /* ── the thesis stage ── */
   #content { position: relative; z-index: 5; background: var(--void); }
   #content::before {
     content:""; position:absolute; top:-140px; left:0; right:0; height:140px;
     background: linear-gradient(transparent, var(--void)); pointer-events:none;
   }
-  .essay {
-    font-family: "Times New Roman", Times, serif;
-    max-width: 640px; margin: 0 auto;
-    padding: 130px 28px 36px;
-    font-size: 20px; line-height: 1.78;
-    color: var(--bone);
+  .thesis-sec { position: relative; height: 330vh; }
+  .thesis-stage {
+    position: sticky; top: 0; height: 100vh;
+    display: grid; place-items: center; overflow: hidden;
   }
-  .essay p { margin: 0 0 30px; }
-  .essay .open {
-    font-size: 30px; font-style: italic; line-height: 1.4;
-    margin-bottom: 38px;
+  .thesis {
+    max-width: 470px; padding: 0 26px;
+    font-size: 14px; line-height: 1.9; color: var(--bone);
   }
-  .essay em { font-style: italic; }
-  .essay a, .essay .show {
-    color: inherit; text-decoration: none; cursor: pointer;
-    border-bottom: 1px solid var(--gold);
-    transition: color .25s, border-color .25s;
+  .thesis .open { font-size: 21px; font-weight: 500; margin-bottom: 22px; }
+  .thesis p { margin: 0 0 18px; }
+  .thesis em { font-style: italic; }
+  .thesis .key {
+    border-bottom: 1px solid var(--line);
+    transition: color .7s ease, border-color .7s ease;
   }
-  .essay a:hover, .essay .show:hover { color: var(--gold); }
-  .essay .show.on { color: var(--gold); border-bottom-style: dashed; }
+  .thesis .key.live { color: var(--gold); border-bottom-color: var(--gold); }
+  .thesis .docline { margin-top: 26px; font-size: 11.5px; }
+  .thesis .docline a { color: var(--smoke); border-bottom: 1px solid var(--line); }
+  .thesis .docline a:hover { color: var(--gold); }
 
-  /* proof, unfolded under the sentence that claims it */
-  .proof {
-    display: none;
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 12px; line-height: 1.8; color: var(--smoke);
-    border-left: 1px solid var(--gold);
-    padding: 4px 0 4px 20px; margin: -16px 0 30px;
-    white-space: pre; overflow-x: auto;
+  /* the proofs surface around the text as it gets read */
+  .sat {
+    position: absolute; pointer-events: none;
+    translate: calc(var(--mx, 0px) * var(--d, 0)) calc(var(--my, 0px) * var(--d, 0));
+    opacity: 0; transform: translateY(22px); filter: blur(10px);
+    transition: opacity 1.1s ease, transform 1.1s cubic-bezier(.22,.9,.24,1), filter 1.1s ease;
   }
-  .proof.on { display: block; }
-  .proof b { color: var(--gold); font-weight: 400; }
-  .proof i { color: var(--flame); font-style: normal; }
+  .sat.live { opacity: 1; transform: none; filter: none; }
+  .sat-in {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; line-height: 1.8; color: var(--smoke);
+    border-left: 1px solid var(--gold);
+    padding: 6px 16px 6px 14px; white-space: pre;
+    background: rgba(7, 5, 4, .85);
+  }
+  .sat-in b { color: var(--gold); font-weight: 400; }
+  .sat-in i { color: var(--flame); font-style: normal; }
+  #sat-math   { top: 3.5%; left: 50%; margin-left: -150px; --d: .5; }
+  #sat-naps   { top: 20%; left: 4%;  --d: .9; }
+  #sat-link   { top: 24%; right: 4%; --d: .7; }
+  #sat-batt   { bottom: 17%; left: 5%; --d: .65; }
+  #sat-mem    { bottom: 20%; right: 4%; --d: 1.0; }
+  #sat-fleet  { bottom: 3%; left: 50%; margin-left: -170px; --d: .45; }
+  @media (max-width: 980px) {
+    .thesis-sec { height: auto; }
+    .thesis-stage { position: static; height: auto; padding: 100px 0 30px; display: block; }
+    .thesis { margin: 0 auto; }
+    .sat { position: static; margin: 22px auto; width: fit-content; translate: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sat { opacity: 1; transform: none; filter: none; transition: none; }
+    .thesis .key { transition: none; }
+  }
 
   /* ── install, plain ── */
   .get {
@@ -235,70 +256,77 @@
 <!-- the shore on the other side -->
 <main id="content">
 
-  <article class="essay">
-    <p class="open">Most people don’t need the cloud.</p>
+  <section class="thesis-sec" id="thesis-sec">
+  <div class="thesis-stage" id="stage">
 
-    <p>I mean that literally. Do the math with me. The laptop you’re reading
-    this on can serve a simple website tens of thousands of times a second —
-    the chip was never the limit. Your home internet is. Call it 25 megabits
-    up. A page is about 30 kilobytes. That’s a hundred pages every second.
-    Eight million a day. If a visitor clicks something every twenty seconds,
-    you can hold <em>two thousand people at once</em>, at something like 80
-    milliseconds. From a laptop. Most websites never see twenty people at
-    once.</p>
+    <div class="thesis">
+      <p class="open">Most people don’t need the cloud.</p>
 
-    <p>So why are we renting? Somewhere along the way we decided hardware was
-    someone else’s job — that an app written at your desk had to make a stop
-    in a datacenter in Virginia before it could reach your friends. We pay
-    monthly for machines we will never see, while ours sits there, asleep,
-    doing nothing with most of its life. You already paid for the computer.
-    You just haven’t asked it to work.</p>
+      <p>I mean that literally. <span class="key" data-sat="sat-math">Do the
+      math with me</span>. The laptop you’re reading this on can serve a
+      simple website tens of thousands of times a second. The chip was never
+      the limit. Your home internet is. Call it 25 megabits up. A page is
+      about 30 kilobytes. That’s a hundred pages every second. Eight million
+      a day. If a visitor clicks something every twenty seconds, you can hold
+      <em>two thousand people at once</em>, at something like 80
+      milliseconds. From a laptop. Most websites never see twenty people at
+      once.</p>
 
-    <p>HADES asks it to work. You describe an app; it runs it in a container
-    and <span class="show" data-proof="pf-link">hands you a link</span>. It
-    knows laptops sleep, so it <span class="show" data-proof="pf-naps">writes
-    every nap down</span> and tells your phone when it’s back. It knows
-    batteries wear out, so it <span class="show" data-proof="pf-batt">watches
-    yours</span> and tells you why. It <span class="show"
-    data-proof="pf-mem">refuses to promise memory it doesn’t have</span>, and
-    when something must give, it gives deliberately — lowest priority first,
-    never the critical. And when one computer stops being enough,
-    <span class="show" data-proof="pf-fleet">add another</span>. The load
-    spreads.</p>
+      <p>So why are we renting? Somewhere along the way we decided hardware
+      was someone else’s job. An app written at your desk makes a stop in a
+      datacenter in Virginia before it reaches your friends. We pay monthly
+      for machines we will never see, while ours sits there, asleep, doing
+      nothing with most of its life. You already paid for the computer. You
+      just haven’t asked it to work.</p>
 
-    <div class="proof" id="pf-link">$ hades deploy
-<b>gates deployed</b>
-  public: https://turns-new-once-roses.trycloudflare.com</div>
+      <p>HADES asks it to work. You describe an app; it runs it in a
+      container and <span class="key" data-sat="sat-link">hands you a
+      link</span>. It knows laptops sleep, so it <span class="key"
+      data-sat="sat-naps">writes every nap down</span> and tells your phone
+      when it’s back. It knows batteries wear out, so it <span class="key"
+      data-sat="sat-batt">watches yours</span> and tells you why. It
+      <span class="key" data-sat="sat-mem">refuses to promise memory it
+      doesn’t have</span>, and when something must give, it gives
+      deliberately. When one computer stops being enough, <span class="key"
+      data-sat="sat-fleet">add another</span>. The load spreads.</p>
 
-    <div class="proof" id="pf-naps">$ hades host uptime
+      <p>Software should be shared. Not provisioned, not uploaded into
+      someone else’s building. Shared, from your own desk, the way the early
+      web worked. The hardware in your house is enough.
+      <em>Build the future on it.</em></p>
+
+      <p class="docline"><a href="docs.html">everything above is real, and documented</a></p>
+    </div>
+
+    <div class="sat" id="sat-math"><div class="sat-in">25 Mbit/s ÷ 30 KB  ≈  <b>100 pages/s</b>
+≈ 8.6M pages/day  ≈  <b>2,000 people at once</b></div></div>
+
+    <div class="sat" id="sat-naps"><div class="sat-in">$ hades host uptime
 availability <b>99.96%</b> · last 7 days
-06-08  02:11 → 02:33   22m   slept
-06-05  09:40 → 09:44    4m   rebooted</div>
+02:11 → 02:33   22m   slept
+09:40 → 09:44    4m   rebooted</div></div>
 
-    <div class="proof" id="pf-batt">$ hades host battery
+    <div class="sat" id="sat-link"><div class="sat-in">$ hades deploy
+<b>gates deployed</b>
+public: https://…trycloudflare.com</div></div>
+
+    <div class="sat" id="sat-batt"><div class="sat-in">$ hades host battery
 capacity <b>92% of design</b> · 312 cycles
 high-charge dwell: 84% of plugged-in time
-→ enable optimized charging · hades’ share of the load: 6%</div>
+hades’ share of the load: 6%</div></div>
 
-    <div class="proof" id="pf-mem">$ hades deploy
-<i>deploy rejected</i>: requested 8.0GB · allocatable 6.3GB
-already claimed: api 4.0GB · worker 2.0GB                exit 3</div>
+    <div class="sat" id="sat-mem"><div class="sat-in">$ hades deploy
+<i>deploy rejected</i>: requested 8.0GB
+allocatable 6.3GB · claimed: api 4.0GB, worker 2.0GB</div></div>
 
-    <div class="proof" id="pf-fleet">$ hades fleet
+    <div class="sat" id="sat-fleet"><div class="sat-in">$ hades fleet
 DEVICE     HEALTH   FREE      APPS
 studio     <b>green</b>    11.2GB    3
 macbook    <b>green</b>     4.1GB    1
-$ hades deploy
-<b>placed on studio</b> — most free memory</div>
+$ hades deploy → <b>placed on studio</b></div></div>
 
-    <p>Software should be shared. Not provisioned, not uploaded into someone
-    else’s building — shared, from your own desk, the way the early web
-    worked. The hardware in your house is enough.
-    <em>Build the future on it.</em></p>
-
-    <p style="font-size:15px;color:var(--smoke)">Everything above is real and
-    documented — <a href="docs.html">read the docs</a>.</p>
-  </article>
+  </div>
+</section>
 
   <section class="get" id="install">
     <h2>Turn this computer into a host.</h2>
