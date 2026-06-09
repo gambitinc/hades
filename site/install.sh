@@ -107,6 +107,31 @@ PATH="$BIN:$PATH"
 say "running hades host init (config · ntfy topic · launchd · doctor)"
 "$BIN/hades" host init || true
 
+# ── 7 · fleet: is this machine joining the others? ─────────────────────
+# /dev/tty so the prompt works even though stdin is the curl pipe
+if [ -e /dev/tty ]; then
+  printf "\n  ${BONE}already running hades on another machine?${OFF}\n"
+  printf "  ${DIM}paste its connect line (from \`hades host connect-info\` there)\n"
+  printf "  to add this device to your fleet — or press Enter to make this\n"
+  printf "  the first host.${OFF}\n\n  > "
+  read -r JOIN_LINE < /dev/tty || JOIN_LINE=""
+  if [ -n "$JOIN_LINE" ]; then
+    HUB_URL=$(printf '%s' "$JOIN_LINE" | sed -n 's/.*--host \([^ ]*\).*/\1/p')
+    HUB_TOK=$(printf '%s' "$JOIN_LINE" | sed -n 's/.*--token \([^ ]*\).*/\1/p')
+    if [ -n "$HUB_URL" ] && [ -n "$HUB_TOK" ]; then
+      say "joining the fleet at $HUB_URL"
+      # the control tunnel can take a few seconds after first boot
+      i=0
+      until "$BIN/hades" host join --hub "$HUB_URL" --token "$HUB_TOK" 2>/dev/null; do
+        i=$((i+1)); [ $i -gt 6 ] && { note "join didn't go through — run later: hades host join --hub $HUB_URL --token <token>"; break; }
+        sleep 5
+      done
+    else
+      note "couldn't parse that line — run later: hades host join --hub <url> --token <token>"
+    fi
+  fi
+fi
+
 # ── next steps ─────────────────────────────────────────────────────────
 printf "\n  ${RED}the host is raised.${OFF}\n\n"
 printf "  enter:          ${BONE}hades login${OFF}\n"

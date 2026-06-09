@@ -18,6 +18,7 @@ use hades_core::{AppSpec, HadesError};
 use serde::Deserialize;
 
 use crate::daemon::Daemon;
+use crate::fleet;
 use crate::reports;
 
 type D = Arc<Daemon>;
@@ -93,6 +94,9 @@ pub fn router(d: D) -> Router {
         .route("/host/battery", get(battery))
         .route("/host/uptime", get(uptime))
         .route("/host/ps", get(ps))
+        .route("/fleet", get(fleet_list))
+        .route("/fleet/devices", post(fleet_join))
+        .route("/fleet/devices/{name}", delete(fleet_remove))
         .route("/events", get(events))
         .route("/notify/test", post(notify_test))
         .route_layer(axum::middleware::from_fn_with_state(d.clone(), require_auth));
@@ -110,7 +114,17 @@ async fn health(State(d): State<D>) -> Json<HealthResponse> {
     })
 }
 
-async fn deploy(State(d): State<D>, mut multipart: Multipart) -> Response {
+#[derive(Deserialize)]
+struct DeployQuery {
+    #[serde(default)]
+    device: Option<String>,
+}
+
+async fn deploy(
+    State(d): State<D>,
+    Query(q): Query<DeployQuery>,
+    mut multipart: Multipart,
+) -> Response {
     let mut spec: Option<AppSpec> = None;
     let mut context: Option<Vec<u8>> = None;
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -151,7 +165,7 @@ async fn deploy(State(d): State<D>, mut multipart: Multipart) -> Response {
         );
     };
 
-    match d.deploy(spec, context).await {
+    match d.deploy(spec, context, q.device).await {
         Ok(resp) => Json(resp).into_response(),
         Err((e, ledger)) => err_response(
             &e,
@@ -161,17 +175,28 @@ async fn deploy(State(d): State<D>, mut multipart: Multipart) -> Response {
 }
 
 async fn list_apps(State(d): State<D>) -> Json<Vec<AppInfo>> {
-    let mut apps: Vec<AppInfo> = d
-        .store
-        .snapshot()
-        .values()
-        .map(|r| d.app_info(r))
-        .collect();
-    apps.sort_by(|a, b| a.name.cmp(&b.name));
-    Json(apps)
+    Json(fleet::merged_apps(&d).await)
+}
+
+/// Apps placed on a fleet device get their commands proxied through.
+fn remote_for(d: &D, app: &str) -> Option<(String, hades_api::DaemonClient)> {
+    let dev = d.placement_of(app)?;
+    let client = d.device_client(&dev)?;
+    Some((dev, client))
+}
+
+fn tag(mut info: AppInfo, device: Option<String>) -> AppInfo {
+    info.device = device;
+    info
 }
 
 async fn get_app(State(d): State<D>, Path(name): Path<String>) -> Response {
+    if let Some((dev, client)) = remote_for(&d, &name) {
+        return match client.get_app(&name).await {
+            Ok(info) => Json(tag(info, Some(dev))).into_response(),
+            Err(e) => err_response(&e.error, None),
+        };
+    }
     match d.store.get(&name) {
         Some(rec) => Json(d.app_info(&rec)).into_response(),
         None => err_response(&HadesError::AppNotFound(name), None),
@@ -179,6 +204,17 @@ async fn get_app(State(d): State<D>, Path(name): Path<String>) -> Response {
 }
 
 async fn destroy(State(d): State<D>, Path(name): Path<String>) -> Response {
+    if let Some((dev, client)) = remote_for(&d, &name) {
+        return match client.destroy(&name).await {
+            Ok(info) => {
+                d.store.update_fleet(|f| {
+                    f.placements.remove(&name);
+                });
+                Json(tag(info, Some(dev))).into_response()
+            }
+            Err(e) => err_response(&e.error, None),
+        };
+    }
     match d.destroy(&name).await {
         Ok(info) => Json(info).into_response(),
         Err(e) => err_response(&e, None),
@@ -186,6 +222,12 @@ async fn destroy(State(d): State<D>, Path(name): Path<String>) -> Response {
 }
 
 async fn pause(State(d): State<D>, Path(name): Path<String>) -> Response {
+    if let Some((dev, client)) = remote_for(&d, &name) {
+        return match client.pause(&name).await {
+            Ok(info) => Json(tag(info, Some(dev))).into_response(),
+            Err(e) => err_response(&e.error, None),
+        };
+    }
     match d.pause_app(&name, PauseReason::Manual).await {
         Ok(info) => Json(info).into_response(),
         Err(e) => err_response(&e, None),
@@ -193,9 +235,58 @@ async fn pause(State(d): State<D>, Path(name): Path<String>) -> Response {
 }
 
 async fn resume(State(d): State<D>, Path(name): Path<String>) -> Response {
+    if let Some((dev, client)) = remote_for(&d, &name) {
+        return match client.resume(&name).await {
+            Ok(info) => Json(tag(info, Some(dev))).into_response(),
+            Err(e) => err_response(&e.error, None),
+        };
+    }
     match d.resume_app(&name).await {
         Ok(info) => Json(info).into_response(),
         Err(e) => err_response(&e, None),
+    }
+}
+
+async fn fleet_join(
+    State(d): State<D>,
+    Json(req): Json<hades_api::types::JoinRequest>,
+) -> Response {
+    if req.name == "local" || req.name.is_empty() {
+        return err_response(
+            &HadesError::InvalidSpec("device name must be non-empty and not 'local'".into()),
+            None,
+        );
+    }
+    d.store.update_fleet(|f| {
+        f.devices.retain(|x| x.name != req.name);
+        f.devices.push(crate::fleet::FleetDeviceRecord {
+            name: req.name.clone(),
+            control_url: req.control_url.clone(),
+            token: req.token.clone(),
+            added_at: chrono::Utc::now(),
+        });
+    });
+    fleet::poll_one(&d, &req.name).await;
+    tracing::info!(device = %req.name, "fleet: device joined");
+    Json(d.fleet_view()).into_response()
+}
+
+async fn fleet_list(State(d): State<D>) -> Json<hades_api::types::FleetView> {
+    Json(d.fleet_view())
+}
+
+async fn fleet_remove(State(d): State<D>, Path(name): Path<String>) -> Response {
+    let existed = d.store.update_fleet(|f| {
+        let before = f.devices.len();
+        f.devices.retain(|x| x.name != name);
+        f.placements.retain(|_, v| *v != name);
+        f.devices.len() != before
+    });
+    d.fleet_status.lock().unwrap().remove(&name);
+    if existed {
+        Json(d.fleet_view()).into_response()
+    } else {
+        err_response(&HadesError::AppNotFound(format!("device {name}")), None)
     }
 }
 
@@ -210,6 +301,20 @@ async fn logs(
     Path(name): Path<String>,
     Query(q): Query<LogsQuery>,
 ) -> Response {
+    if let Some((_dev, client)) = remote_for(&d, &name) {
+        return match client.logs(&name, q.follow).await {
+            Ok(resp) => {
+                let stream = resp.bytes_stream().map(|c| {
+                    c.map_err(|e| std::io::Error::other(e.to_string()))
+                });
+                Response::builder()
+                    .header("content-type", "text/plain; charset=utf-8")
+                    .body(Body::from_stream(stream))
+                    .unwrap()
+            }
+            Err(e) => err_response(&e.error, None),
+        };
+    }
     let Some(rec) = d.store.get(&name) else {
         return err_response(&HadesError::AppNotFound(name), None);
     };
@@ -233,6 +338,12 @@ async fn logs(
 }
 
 async fn stats(State(d): State<D>, Path(name): Path<String>) -> Response {
+    if let Some((_dev, client)) = remote_for(&d, &name) {
+        return match client.app_stats(&name).await {
+            Ok(st) => Json(st).into_response(),
+            Err(e) => err_response(&e.error, None),
+        };
+    }
     let Some(rec) = d.store.get(&name) else {
         return err_response(&HadesError::AppNotFound(name), None);
     };

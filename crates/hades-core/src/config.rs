@@ -25,6 +25,16 @@ pub struct HadesConfig {
     /// --token` presents from another machine.
     pub auth_token: Option<String>,
     pub notify: NotifyConfig,
+    pub fleet: FleetConfig,
+}
+
+/// Device-side record of who owns this machine. Written by
+/// `hades host join`; presence means "this device is part of a fleet".
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FleetConfig {
+    pub hub_url: Option<String>,
+    pub hub_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +61,7 @@ impl Default for HadesConfig {
             disk_min_free_gb: 5.0,
             auth_token: None,
             notify: NotifyConfig::default(),
+            fleet: FleetConfig::default(),
         }
     }
 }

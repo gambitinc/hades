@@ -65,11 +65,20 @@ enum Cmd {
         /// Directory containing Hades.toml (default: cwd).
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// Pin to a fleet device by name ("local" = the hub itself).
+        #[arg(long)]
+        device: Option<String>,
     },
     /// Manage deployed apps.
     Apps {
         #[command(subcommand)]
         cmd: AppsCmd,
+    },
+    /// Your devices: list them, add one, remove one. Deploys are placed on
+    /// whichever device has the most free memory.
+    Fleet {
+        #[command(subcommand)]
+        cmd: Option<FleetCmd>,
     },
     /// Print an app's current public URL (URLs change when tunnels restart).
     Url { name: String },
@@ -118,6 +127,19 @@ enum HostCmd {
     /// Print the command another machine runs to control this host
     /// (control-tunnel URL + bearer token). Treat it like a password.
     ConnectInfo,
+    /// Join this machine to a fleet: registers this device with the hub and
+    /// marks it as yours. Run on the NEW device.
+    Join {
+        /// The hub's control URL (from `hades host connect-info` on the hub).
+        #[arg(long)]
+        hub: String,
+        /// The hub's bearer token.
+        #[arg(long)]
+        token: String,
+        /// Name for this device (default: this Mac's hostname).
+        #[arg(long)]
+        name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -138,6 +160,16 @@ enum AppsCmd {
     Resume { name: String },
     /// Destroy an app: container(s), routes, tunnel.
     Destroy { name: String },
+}
+
+#[derive(Subcommand)]
+enum FleetCmd {
+    /// List devices with live capacity (default).
+    List,
+    /// Print the two lines to run on a new machine to add it.
+    Add,
+    /// Remove a device from the fleet (its apps keep running on it).
+    Remove { name: String },
 }
 
 #[derive(Subcommand)]
@@ -208,8 +240,9 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Cmd::Init => scaffold_manifest(json),
-        Cmd::Deploy { app, dir } => deploy(app, dir, json).await,
+        Cmd::Deploy { app, dir, device } => deploy(app, dir, device, json).await,
         Cmd::Apps { cmd } => apps_cmd(cmd, json).await,
+        Cmd::Fleet { cmd } => fleet_cmd(cmd.unwrap_or(FleetCmd::List), json).await,
         Cmd::Url { name } => match client().get_app(&name).await {
             Ok(info) => {
                 if json {
@@ -465,6 +498,73 @@ async fn host_cmd(cmd: HostCmd, json: bool) -> ExitCode {
                 Err(e) => fail(e, json),
             }
         }
+        HostCmd::Join { hub, token, name } => {
+            // this device must be up with a control tunnel before it can join
+            let local = DaemonClient::for_host(
+                &format!("127.0.0.1:{}", config.api_port),
+                config.auth_token.clone(),
+            );
+            let status = match local.host_status().await {
+                Ok(s) => s,
+                Err(e) => return fail(e, json),
+            };
+            let Some(control_url) = status.control_url else {
+                return fail(
+                    HadesError::Other(
+                        "this device has no control tunnel yet — install cloudflared and restart the daemon, then re-run join".into(),
+                    ),
+                    json,
+                );
+            };
+            let Some(own_token) = config.auth_token.clone() else {
+                return fail(
+                    HadesError::Other("no auth token in config — run `hades host init`".into()),
+                    json,
+                );
+            };
+            let device_name = name.unwrap_or_else(|| {
+                std::process::Command::new("hostname")
+                    .arg("-s")
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "device".into())
+            });
+
+            // mark ownership on this device
+            let mut cfg = config.clone();
+            cfg.fleet.hub_url = Some(hub.clone());
+            cfg.fleet.hub_token = Some(token.clone());
+            if let Err(e) = cfg.save(&paths.config()) {
+                return fail(HadesError::Other(format!("cannot save config: {e}")), json);
+            }
+
+            let hub_client = DaemonClient::for_host(&hub, Some(token));
+            match hub_client
+                .join(&hades_api::types::JoinRequest {
+                    name: device_name.clone(),
+                    control_url,
+                    token: own_token,
+                })
+                .await
+            {
+                Ok(view) => {
+                    if json {
+                        render::json(&view);
+                    } else {
+                        println!();
+                        println!("  ⚖ {device_name} joined the fleet");
+                        println!();
+                        render::fleet(&view);
+                        println!();
+                        println!("  deploys from the hub now consider this device.");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e, json),
+            }
+        }
         HostCmd::Ps => match client().ps().await {
             Ok(p) => {
                 if json {
@@ -532,7 +632,12 @@ on_battery = "run"      # or "pause" to save battery when unplugged
     ExitCode::SUCCESS
 }
 
-async fn deploy(app: Option<String>, dir: Option<PathBuf>, json: bool) -> ExitCode {
+async fn deploy(
+    app: Option<String>,
+    dir: Option<PathBuf>,
+    device: Option<String>,
+    json: bool,
+) -> ExitCode {
     let dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap());
     let (mut manifest, manifest_path) = match Manifest::load(&dir) {
         Ok(m) => m,
@@ -566,7 +671,7 @@ async fn deploy(app: Option<String>, dir: Option<PathBuf>, json: bool) -> ExitCo
         spec.replicas,
         if spec.replicas == 1 { "" } else { "s" }
     );
-    match client().deploy(&spec, context_tar).await {
+    match client().deploy(&spec, context_tar, device.as_deref()).await {
         Ok(resp) => {
             if json {
                 render::json(&resp);
@@ -649,6 +754,65 @@ async fn apps_cmd(cmd: AppsCmd, json: bool) -> ExitCode {
                     render::json(&info);
                 } else {
                     println!("{} destroyed (container, routes, tunnel)", info.name);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e, json),
+        },
+    }
+}
+
+async fn fleet_cmd(cmd: FleetCmd, json: bool) -> ExitCode {
+    let c = client();
+    match cmd {
+        FleetCmd::List => match c.fleet().await {
+            Ok(view) => {
+                if json {
+                    render::json(&view);
+                } else if view.devices.is_empty() {
+                    println!("no devices joined — `hades fleet add` prints what to run on a new machine");
+                } else {
+                    render::fleet(&view);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e, json),
+        },
+        FleetCmd::Remove { name } => match c.fleet_remove(&name).await {
+            Ok(view) => {
+                if json {
+                    render::json(&view);
+                } else {
+                    println!("{name} removed from the fleet (its apps keep running there)");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e, json),
+        },
+        FleetCmd::Add => match c.host_status().await {
+            Ok(s) => {
+                let paths = HadesPaths::new();
+                let config = HadesConfig::load_or_default(&paths.config());
+                let (Some(url), Some(token)) = (s.control_url, config.auth_token) else {
+                    return fail(
+                        HadesError::Other(
+                            "the hub needs a control tunnel + token first (install cloudflared, restart the daemon)".into(),
+                        ),
+                        json,
+                    );
+                };
+                if json {
+                    render::json(&serde_json::json!({
+                        "join_command": format!("hades host join --hub {url} --token {token}"),
+                    }));
+                } else {
+                    println!();
+                    println!("  on the new machine:");
+                    println!();
+                    println!("    1. install hades (the site's install script), then:");
+                    println!("    2. hades host join --hub {url} --token {token}");
+                    println!();
+                    println!("  the installer also offers this step interactively.");
                 }
                 ExitCode::SUCCESS
             }

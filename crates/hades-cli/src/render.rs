@@ -37,8 +37,9 @@ pub fn doctor(report: &DoctorReport) {
 pub fn app_line(a: &AppInfo) {
     let url = a.url.as_deref().unwrap_or("-");
     println!(
-        "{:<14} {:<10} {:>2}/{:<2} {:>6}MB {:>4.1}cpu  {}  {}",
+        "{:<14} {:<8} {:<10} {:>2}/{:<2} {:>6}MB {:>4.1}cpu  {}  {}",
         a.name,
+        a.device.as_deref().unwrap_or("local"),
         a.state.to_string(),
         a.replicas_running,
         a.replicas_desired,
@@ -55,8 +56,8 @@ pub fn apps(list: &[AppInfo]) {
         return;
     }
     println!(
-        "{:<14} {:<10} {:<5} {:>8} {:>7}  LOCAL  PUBLIC",
-        "NAME", "STATE", "REPL", "MEM", "CPU"
+        "{:<14} {:<8} {:<10} {:<5} {:>8} {:>7}  LOCAL  PUBLIC",
+        "NAME", "DEVICE", "STATE", "REPL", "MEM", "CPU"
     );
     for a in list {
         app_line(a);
@@ -193,6 +194,26 @@ pub fn ps(p: &PsReport) {
             e.cpu_pct.map(|c| format!("{c:.1}%")).unwrap_or("-".into()),
             e.detail,
             e.state
+        );
+    }
+}
+
+pub fn fleet(v: &FleetView) {
+    println!(
+        "{:<12} {:<8} {:>10} {:>12} {:<6} LAST SEEN",
+        "DEVICE", "HEALTH", "FREE", "ALLOCATABLE", "APPS"
+    );
+    for d in &v.devices {
+        println!(
+            "{:<12} {:<8} {:>8}MB {:>10}MB {:<6} {}",
+            d.name,
+            if d.healthy { "green" } else { "red" },
+            d.free_mb,
+            d.allocatable_mb,
+            d.apps,
+            d.last_seen
+                .map(|t| t.format("%H:%M:%S").to_string())
+                .unwrap_or_else(|| "never".into()),
         );
     }
 }

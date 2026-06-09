@@ -56,15 +56,26 @@ pub struct Registry {
     pub daemon_pid: Option<u32>,
 }
 
+/// The hub's record of its fleet: joined devices plus where remote apps
+/// were placed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FleetFile {
+    pub devices: Vec<crate::fleet::FleetDeviceRecord>,
+    /// app name -> device name (apps absent here run on the hub itself)
+    pub placements: HashMap<String, String>,
+}
+
 pub struct Store {
     apps_path: PathBuf,
     registry_path: PathBuf,
+    fleet_path: PathBuf,
     apps: Mutex<HashMap<String, AppRecord>>,
     registry: Mutex<Registry>,
+    fleet: Mutex<FleetFile>,
 }
 
 impl Store {
-    pub fn load(apps_path: PathBuf, registry_path: PathBuf) -> Self {
+    pub fn load(apps_path: PathBuf, registry_path: PathBuf, fleet_path: PathBuf) -> Self {
         let apps = std::fs::read_to_string(&apps_path)
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
@@ -73,11 +84,17 @@ impl Store {
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_default();
+        let fleet = std::fs::read_to_string(&fleet_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
         Self {
             apps_path,
             registry_path,
+            fleet_path,
             apps: Mutex::new(apps),
             registry: Mutex::new(registry),
+            fleet: Mutex::new(fleet),
         }
     }
 
@@ -131,5 +148,24 @@ impl Store {
 
     pub fn registry_snapshot(&self) -> Registry {
         self.registry.lock().unwrap().clone()
+    }
+
+    pub fn fleet_snapshot(&self) -> FleetFile {
+        self.fleet.lock().unwrap().clone()
+    }
+
+    pub fn update_fleet<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut FleetFile) -> R,
+    {
+        let mut fleet = self.fleet.lock().unwrap();
+        let r = f(&mut fleet);
+        if let Ok(json) = serde_json::to_string_pretty(&*fleet) {
+            let tmp = self.fleet_path.with_extension("tmp");
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, &self.fleet_path);
+            }
+        }
+        r
     }
 }

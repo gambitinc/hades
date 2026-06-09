@@ -4,6 +4,7 @@
 
 mod api;
 mod daemon;
+mod fleet;
 mod policy;
 mod power;
 mod reports;
@@ -114,7 +115,7 @@ async fn main() {
     let d = Arc::new(Daemon {
         notifiers: Notifiers::from_config(&config.notify),
         provider: QuickTunnelProvider::detect(),
-        store: Store::load(paths.apps_state(), paths.registry()),
+        store: Store::load(paths.apps_state(), paths.registry(), paths.fleet_state()),
         table: RouteTable::new(),
         tunnel_cancels: Mutex::new(Default::default()),
         doctor_green: AtomicBool::new(false),
@@ -125,6 +126,7 @@ async fn main() {
         last_total_cpu_pct: Mutex::new(0.0),
         pressure: Mutex::new(PressureLevel::Normal),
         http: reqwest::Client::new(),
+        fleet_status: Mutex::new(Default::default()),
         runtime,
         bus: bus.clone(),
         config: config.clone(),
@@ -246,6 +248,7 @@ async fn main() {
 
     // --- background loops ---
     tokio::spawn(watchdog::run(d.clone()));
+    tokio::spawn(fleet::poll(d.clone()));
     tokio::spawn(power::run(d.clone()));
 
     // uptime heartbeat + live sleep detection

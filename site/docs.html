@@ -77,6 +77,7 @@
       <a href="#first-deploy">First deploy</a>
       <a href="#manifest">Hades.toml</a>
       <a href="#cli">CLI reference</a>
+      <a href="#fleet">Fleet</a>
       <a href="#json">JSON contract</a>
       <a href="#events">Events</a>
       <a href="#operations">Operating the host</a>
@@ -212,15 +213,54 @@ PORT = "8000"</code></pre>
     </section>
 
     <!-- ════════════════════════════ -->
+    <section id="fleet">
+      <h2><span class="n">05</span>Fleet</h2>
+      <p>One machine is a host. Several are a fleet. The host you log into is
+      the <b>hub</b>; other devices <b>join</b> it, and from then on a plain
+      <code>hades deploy</code> is placed on whichever device has the most free
+      declared memory. Replicas round-robin within each device.</p>
+      <h3>Adding a device</h3>
+      <pre><code><span class="c"># on the hub — prints the join line</span>
+$ hades fleet add
+
+<span class="c"># on the new machine — the installer offers this interactively,</span>
+<span class="c"># or run it yourself after install:</span>
+$ hades host join --hub https://….trycloudflare.com --token 21c5…</code></pre>
+      <p>Joining requires the hub's bearer token — that is what marks the
+      device as <b>yours</b>. The device also records its hub in its own
+      config, and the hub stores how to reach the device (control URL +
+      token), so it can deploy to it, stream its logs, and poll its health
+      every 30 seconds.</p>
+      <h3>Operating the fleet</h3>
+      <pre><code>$ hades fleet
+DEVICE     HEALTH   FREE      ALLOCATABLE  APPS   LAST SEEN
+studio     green    11468MB   12700MB      3      14:02:11
+macbook    green     4121MB    6348MB      1      14:02:13
+
+$ hades deploy --device studio    <span class="c"># pin placement</span>
+$ hades deploy --device local     <span class="c"># force the hub itself</span>
+$ hades fleet remove macbook      <span class="c"># apps keep running there</span></code></pre>
+      <p><code>hades apps list</code> shows a DEVICE column; logs, stats,
+      pause/resume and destroy are proxied through the hub to wherever the
+      app lives. Request-level balancing of one app across several devices
+      is a designed extension (the route table already supports multiple
+      backends per hostname); today the balancing is at placement time.</p>
+    </section>
+
+    <!-- ════════════════════════════ -->
     <section id="cli">
-      <h2><span class="n">05</span>CLI reference</h2>
+      <h2><span class="n">06</span>CLI reference</h2>
       <table>
         <tr><th>command</th><th>what it does</th></tr>
         <tr><td>hades login [--host] [--token]</td><td>connect to a host (local or remote), verify readiness, record the session</td></tr>
         <tr><td>hades logout</td><td>forget the session; commands target the local host again</td></tr>
         <tr><td>hades host connect-info</td><td>print the login command another machine uses to control this host</td></tr>
+        <tr><td>hades host join --hub --token</td><td>join this device to a fleet (run on the new device)</td></tr>
+        <tr><td>hades fleet [list]</td><td>devices with live health and free capacity</td></tr>
+        <tr><td>hades fleet add</td><td>print what to run on a new machine</td></tr>
+        <tr><td>hades fleet remove &lt;name&gt;</td><td>drop a device from the registry</td></tr>
         <tr><td>hades init</td><td>scaffold a Hades.toml in the current directory</td></tr>
-        <tr><td>hades deploy [--app] [--dir]</td><td>idempotent upsert: build/pull, health-gate, swap routes, print the link</td></tr>
+        <tr><td>hades deploy [--app] [--dir] [--device]</td><td>idempotent upsert: build/pull, health-gate, swap routes, print the link</td></tr>
         <tr><td>hades apps list</td><td>all apps with state, replicas, memory, URLs</td></tr>
         <tr><td>hades apps logs &lt;name&gt; [--follow]</td><td>stream container logs</td></tr>
         <tr><td>hades apps stats &lt;name&gt;</td><td>requests, in-flight, shed count, p50/p95 latency, per-replica memory/CPU</td></tr>
@@ -240,7 +280,7 @@ PORT = "8000"</code></pre>
 
     <!-- ════════════════════════════ -->
     <section id="json">
-      <h2><span class="n">06</span>JSON contract</h2>
+      <h2><span class="n">07</span>JSON contract</h2>
       <p>Every command accepts <code>--json</code> and then prints <b>exactly one JSON object</b>
       on stdout (streams print NDJSON). Progress and decoration go to stderr, so pipes stay clean:</p>
       <pre><code>hades deploy --json | jq -r .app.url</code></pre>
@@ -264,7 +304,7 @@ PORT = "8000"</code></pre>
 
     <!-- ════════════════════════════ -->
     <section id="events">
-      <h2><span class="n">07</span>Events</h2>
+      <h2><span class="n">08</span>Events</h2>
       <p>Everything observable flows through one stream — <code>hades events --follow --json</code>
       is the live wire. Each line is <code>{ "at": …, "type": …, …fields }</code>.</p>
       <table>
@@ -294,7 +334,7 @@ PORT = "8000"</code></pre>
 
     <!-- ════════════════════════════ -->
     <section id="operations">
-      <h2><span class="n">08</span>Operating the host</h2>
+      <h2><span class="n">09</span>Operating the host</h2>
       <h3>Capacity is the VM's, not the Mac's</h3>
       <p>On macOS, containers live inside the Docker VM. All admission math uses the
       <b>VM's</b> memory and CPUs; <code>hades host status</code> shows both numbers so you never
@@ -318,7 +358,7 @@ PORT = "8000"</code></pre>
 
     <!-- ════════════════════════════ -->
     <section id="architecture">
-      <h2><span class="n">09</span>Architecture</h2>
+      <h2><span class="n">10</span>Architecture</h2>
       <pre><code>crates/
 ├── hades-core      shared types: AppSpec, manifest, events, errors, config
 ├── hades-api       the CLI⇄daemon wire contract + client
@@ -344,7 +384,7 @@ PORT = "8000"</code></pre>
 
     <!-- ════════════════════════════ -->
     <section id="config">
-      <h2><span class="n">10</span>Configuration</h2>
+      <h2><span class="n">11</span>Configuration</h2>
       <p><code>~/.hades/config.toml</code>, written by <code>hades host init</code>:</p>
       <table>
         <tr><th>key</th><th>default</th><th>meaning</th></tr>
@@ -358,6 +398,7 @@ PORT = "8000"</code></pre>
         <tr><td>notify.ntfy_topic</td><td>generated</td><td>your phone's push channel — keep it secret</td></tr>
         <tr><td>notify.mac_notifications</td><td>true</td><td>also notify the local notification center</td></tr>
         <tr><td>notify.healthchecks_url</td><td>—</td><td>dead-man's switch ping URL</td></tr>
+        <tr><td>fleet.hub_url / fleet.hub_token</td><td>—</td><td>written by <code>hades host join</code>: which hub owns this device</td></tr>
       </table>
       <p>State lives under <code>~/.hades/</code>: desired state and the process registry in
       <code>state/</code>, the uptime and event ledgers in <code>ledger/</code>, battery and resource

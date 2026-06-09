@@ -41,6 +41,8 @@ pub struct Daemon {
     pub last_total_cpu_pct: Mutex<f64>,
     pub pressure: Mutex<PressureLevel>,
     pub http: reqwest::Client,
+    /// Last-known health/capacity of each fleet device (poller cache).
+    pub fleet_status: Mutex<crate::fleet::FleetStatusMap>,
 }
 
 impl Daemon {
@@ -146,8 +148,48 @@ impl Daemon {
         self: &std::sync::Arc<Self>,
         spec: AppSpec,
         context_tar_gz: Option<Vec<u8>>,
+        device: Option<String>,
     ) -> Result<DeployResponse, (HadesError, Option<ResourceLedger>)> {
         spec.validate().map_err(|e| (e, None))?;
+
+        // fleet placement: explicit pin, or capacity-weighted choice across
+        // joined devices; "local" always means this hub
+        let target = match device.as_deref() {
+            Some("local") | Some("") => None,
+            Some(name) => {
+                if self.device_client(name).is_none() {
+                    return Err((
+                        HadesError::AppNotFound(format!("no fleet device named '{name}'")),
+                        None,
+                    ));
+                }
+                Some(name.to_string())
+            }
+            None => {
+                let needed = spec.resources.memory_mb * spec.replicas as u64;
+                self.choose_device(needed).await
+            }
+        };
+        if let Some(dev) = target {
+            let client = self.device_client(&dev).expect("device exists");
+            let mut resp = client
+                .deploy(&spec, context_tar_gz, Some("local"))
+                .await
+                .map_err(|e| (e.error, None))?;
+            resp.app.device = Some(dev.clone());
+            self.store.update_fleet(|f| {
+                f.placements.insert(spec.name.clone(), dev.clone());
+            });
+            self.emit(HostEvent::AppDeployed {
+                app: format!("{} → {}", spec.name, dev),
+                replaced: resp.replaced,
+            });
+            return Ok(resp);
+        }
+        // a hub-local deploy clears any stale remote placement
+        self.store.update_fleet(|f| {
+            f.placements.remove(&spec.name);
+        });
 
         if !self.doctor_green.load(Ordering::Relaxed) {
             let failed = self.doctor_failed.lock().unwrap().join(", ");
@@ -514,6 +556,7 @@ impl Daemon {
         AppInfo {
             name: rec.spec.name.clone(),
             state: rec.state,
+            device: None,
             priority: rec.spec.priority,
             replicas_desired: rec.spec.replicas,
             replicas_running: rec.replicas.len() as u8,

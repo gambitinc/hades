@@ -33,6 +33,9 @@ impl std::fmt::Display for AppState {
 pub struct AppInfo {
     pub name: String,
     pub state: AppState,
+    /// Which fleet device runs this app. None = the host you asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
     pub priority: Priority,
     pub replicas_desired: u8,
     pub replicas_running: u8,
@@ -180,6 +183,34 @@ pub enum PsKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PsReport {
     pub entries: Vec<PsEntry>,
+}
+
+/// A device asking to join a fleet: its name plus how the hub reaches it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinRequest {
+    pub name: String,
+    pub control_url: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetDeviceView {
+    pub name: String,
+    pub control_url: String,
+    pub healthy: bool,
+    pub vm_memory_mb: u64,
+    pub allocatable_mb: u64,
+    pub allocated_mb: u64,
+    pub free_mb: u64,
+    pub apps: u32,
+    pub last_seen: Option<DateTime<Utc>>,
+    pub added_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetView {
+    /// The hub itself, as the first entry (name "local").
+    pub devices: Vec<FleetDeviceView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -9,13 +9,14 @@ import socketserver
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        if self.path.split("?")[0] == "/install.sh":
+        path = self.path.split("?")[0]
+        if path in ("/install.sh", "/cli.sh"):
             host = self.headers.get("Host", "localhost:8000")
             proto = self.headers.get("X-Forwarded-Proto") or (
                 "https" if host.endswith(".trycloudflare.com") else "http"
             )
             origin = f"{proto}://{host}"
-            with open("install.sh", "rb") as f:
+            with open(path.lstrip("/"), "rb") as f:
                 body = f.read().replace(b"__ORIGIN__", origin.encode())
             self.send_response(200)
             self.send_header("Content-Type", "text/x-shellscript; charset=utf-8")

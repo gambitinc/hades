@@ -93,11 +93,13 @@ impl DaemonClient {
     }
 
     /// Deploy (upsert). `context_tar_gz` is the gzipped build-context tarball
-    /// when the spec has a [build] section.
+    /// when the spec has a [build] section. `device` pins fleet placement
+    /// ("local" forces the hub itself; None lets the hub choose).
     pub async fn deploy(
         &self,
         spec: &AppSpec,
         context_tar_gz: Option<Vec<u8>>,
+        device: Option<&str>,
     ) -> Result<DeployResponse, ApiError> {
         let mut form = multipart::Form::new().text(
             "spec",
@@ -112,13 +114,48 @@ impl DaemonClient {
                     .expect("static mime"),
             );
         }
+        let mut url = format!("{}/apps", self.base);
+        if let Some(d) = device {
+            url.push_str(&format!("?device={d}"));
+        }
         Self::check(
-            self.auth(self.http.post(format!("{}/apps", self.base)))
+            self.auth(self.http.post(url))
                 .multipart(form)
                 // builds can be slow; let the daemon decide when to give up
                 .timeout(std::time::Duration::from_secs(600))
                 .send()
                 .await,
+        )
+        .await
+    }
+
+    pub async fn join(&self, req: &JoinRequest) -> Result<FleetView, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/fleet/devices", self.base)))
+                .json(req)
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    pub async fn fleet(&self) -> Result<FleetView, ApiError> {
+        Self::check(
+            self.auth(self.http.get(format!("{}/fleet", self.base)))
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    pub async fn fleet_remove(&self, name: &str) -> Result<FleetView, ApiError> {
+        Self::check(
+            self.auth(
+                self.http
+                    .delete(format!("{}/fleet/devices/{name}", self.base)),
+            )
+            .send()
+            .await,
         )
         .await
     }
