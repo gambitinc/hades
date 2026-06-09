@@ -340,12 +340,12 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
       <b>VM's</b> memory and CPUs; <code>hades host status</code> shows both numbers so you never
       budget against RAM your containers can't touch. A configurable reserve (default 20%)
       is kept out of the allocatable pool.</p>
-      <h3>Uptime</h3>
+      <h3 id="uptime">Uptime</h3>
       <p>The daemon heartbeats to disk every 30s. On any gap it classifies the window by
       cross-referencing the kernel boot time and <code>pmset</code> sleep history, appends it to the
       ledger, and pushes "host back, here are the new links". <code>hades host uptime</code>
       renders availability with causes.</p>
-      <h3>Battery</h3>
+      <h3 id="battery">Battery</h3>
       <p><code>hades host battery</code> reads weeks of 5-minute telemetry and answers <i>why</i>:
       capacity trend vs design, cycle burn rate, <b>high-charge dwell</b> (the silent killer for
       always-plugged hosts), temperature under load, and HADES' own share of CPU during the
