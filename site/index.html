@@ -22,11 +22,12 @@
   body {
     background: var(--void);
     color: var(--bone);
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
     font-size: 14px; line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
   }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
   a { color: var(--gold); text-decoration:none; border-bottom:1px solid var(--line); }
   a:hover { border-bottom-color: var(--gold); }
   ::selection { background: var(--ember); color: var(--bone); }
@@ -49,7 +50,7 @@
     pointer-events: none; text-align: center;
   }
   #title h1 {
-    font-weight: 300;
+    font-weight: 200;
     font-size: clamp(44px, 7.5vw, 104px);
     line-height: 1; letter-spacing: .42em;
     margin-left: .42em; /* optically recenter tracked text */
@@ -84,26 +85,42 @@
   /* ── nav ──────────────────────────────────────────────── */
   header {
     position: fixed; top: 0; left: 0; right: 0; z-index: 10;
-    border-bottom: 1px solid transparent;
-    transition: background .4s, border-color .4s;
-  }
-  header.solid {
-    background: color-mix(in srgb, var(--void) 88%, transparent);
+    background: color-mix(in srgb, var(--void) 86%, transparent);
     backdrop-filter: blur(8px);
-    border-bottom-color: var(--line);
+    transform: translateY(-100%);
+    transition: transform .65s cubic-bezier(.22, .9, .24, 1);
+    pointer-events: none;
   }
+  header.on { transform: none; pointer-events: auto; }
   .bar {
     max-width: 1100px; margin: 0 auto; padding: 0 24px;
     height: 54px; display: flex; justify-content: space-between; align-items: center;
+    position: relative;
   }
-  .mark { display:flex; align-items:center; gap:10px; border:none; }
-  .mark b { font-weight:400; font-size:14px; letter-spacing:.4em; color:var(--bone); }
-  .mark .sigil { color: var(--gold); }
+  /* the hairline draws itself in after the bar lands */
+  .bar::after {
+    content:""; position:absolute; left:24px; right:24px; bottom:0; height:1px;
+    background: linear-gradient(90deg, var(--gold), var(--line) 35%);
+    transform: scaleX(0); transform-origin: left;
+    transition: transform .9s cubic-bezier(.22,.9,.24,1) .25s;
+  }
+  header.on .bar::after { transform: scaleX(1); }
+  .mark { border:none; }
+  .mark b {
+    font-weight: 500; font-size: 13px; letter-spacing: .55em; color: var(--bone);
+    opacity: 0; transition: opacity .6s ease .2s, letter-spacing .8s cubic-bezier(.22,.9,.24,1) .2s;
+  }
+  header.on .mark b { opacity: 1; letter-spacing: .4em; }
   nav.links { display:flex; gap:26px; }
   nav.links a {
     border: none; color: var(--smoke);
-    font-size: 11px; letter-spacing: .28em; text-transform: uppercase;
+    font-size: 11px; letter-spacing: .24em; text-transform: uppercase;
+    opacity: 0; transform: translateY(-8px);
+    transition: opacity .5s ease, transform .5s ease, color .25s;
   }
+  header.on nav.links a { opacity: 1; transform: none; }
+  header.on nav.links a:nth-child(1) { transition-delay: .35s, .35s, 0s; }
+  header.on nav.links a:nth-child(2) { transition-delay: .45s, .45s, 0s; }
   nav.links a:hover { color: var(--gold); }
 
   /* ── the essay ── */
@@ -155,15 +172,14 @@
     background: var(--gold); margin-bottom: 44px;
   }
   .get h2 {
-    font-family: "Times New Roman", Times, serif;
-    font-size: 20px; font-weight: 400; font-style: italic;
-    color: var(--bone); margin-bottom: 10px;
+    font-size: 15px; font-weight: 500; letter-spacing: .02em;
+    color: var(--bone); margin-bottom: 8px;
   }
   .get .why {
-    font-family: "Times New Roman", Times, serif;
-    font-size: 16px; color: var(--smoke); margin-bottom: 16px;
+    font-size: 13px; color: var(--smoke); margin-bottom: 16px;
   }
   .get .cmd {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
     display: block; font-size: 14px; color: var(--bone);
     cursor: pointer; margin-bottom: 8px; width: fit-content;
     border-bottom: 1px dashed var(--line);
@@ -174,7 +190,7 @@
   .get .hint {
     font-size: 11.5px; color: var(--smoke); margin: 0 0 40px;
   }
-  .get .hint code { color: var(--smoke); }
+  .get .hint code { color: var(--smoke); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 
   footer {
     border-top: 1px solid var(--line);
@@ -198,7 +214,7 @@
 
 <header id="hdr">
   <div class="bar">
-    <a class="mark" href="#"><span class="sigil">⚖</span><b>HADES</b></a>
+    <a class="mark" href="#"><b>HADES</b></a>
     <nav class="links">
       <a href="docs.html">Docs</a>
       <a href="#install">Install</a>
@@ -323,6 +339,12 @@ $ hades deploy
     });
   });
   // claims unfold their proof
+  // the navbar exists only once you scroll — it animates itself in
+  const hdr = document.getElementById('hdr');
+  const navWatch = () => hdr.classList.toggle('on', scrollY > innerHeight * 0.22);
+  addEventListener('scroll', navWatch, { passive: true });
+  navWatch();
+
   document.querySelectorAll('.show[data-proof]').forEach(el => {
     el.addEventListener('click', () => {
       const proof = document.getElementById(el.dataset.proof);
@@ -518,7 +540,6 @@ if (renderer) {
   const cinema = document.getElementById('cinema');
   const titleEl = document.getElementById('title');
   const cueEl = document.getElementById('cue');
-  const hdr = document.getElementById('hdr');
 
   const sstep = (a, b, x) => { const t = Math.min(Math.max((x-a)/(b-a), 0), 1); return t*t*(3-2*t); };
   let mouseX = 0, mouseY = 0;
@@ -533,7 +554,6 @@ if (renderer) {
     if (forcedP !== null) { progress = +forcedP; return; }
     const span = cinema.offsetHeight - innerHeight;
     progress = span > 0 ? Math.min(Math.max(scrollY / span, 0), 1) : 1;
-    hdr.classList.toggle('solid', scrollY > innerHeight * 0.5);
   }
   addEventListener('scroll', onScroll, { passive: true });
   onScroll();

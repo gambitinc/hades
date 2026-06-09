@@ -12,7 +12,7 @@
   }
   *{margin:0;padding:0;box-sizing:border-box;}
   html{scroll-behavior:smooth;scroll-padding-top:80px;}
-  body{background:var(--void);color:var(--bone);font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased;}
+  body{background:var(--void);color:var(--bone);font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;font-size:14.5px;line-height:1.7;-webkit-font-smoothing:antialiased;}
   a{color:var(--gold);text-decoration:none;border-bottom:1px solid var(--line);}
   a:hover{border-bottom-color:var(--gold);}
   ::selection{background:var(--ember);color:var(--bone);}
@@ -46,15 +46,15 @@
   p b, li b{color:var(--bone);font-weight:400;}
   ul{margin:12px 0 12px 18px;color:var(--smoke);}
   li{margin:6px 0;}
-  pre{border:1px solid var(--line);background:var(--panel);padding:18px 20px;overflow-x:auto;font-size:13px;line-height:1.55;margin:16px 0;color:var(--bone);}
+  pre{font-family:ui-monospace,"SF Mono",Menlo,monospace;border:1px solid var(--line);background:var(--panel);padding:18px 20px;overflow-x:auto;font-size:13px;line-height:1.55;margin:16px 0;color:var(--bone);}
   pre .c{color:var(--smoke);} pre .g{color:var(--gold);} pre .r{color:var(--flame);}
-  code{color:var(--bone);background:var(--soot);padding:1px 6px;border:1px solid var(--line);font-size:12.5px;}
+  code{font-family:ui-monospace,"SF Mono",Menlo,monospace;color:var(--bone);background:var(--soot);padding:1px 6px;border:1px solid var(--line);font-size:12.5px;}
   pre code{background:none;border:none;padding:0;}
   table{border-collapse:collapse;width:100%;margin:16px 0;font-size:12.5px;}
   td,th{border:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:top;}
   th{color:var(--bone);font-weight:400;letter-spacing:.18em;text-transform:uppercase;font-size:10.5px;background:var(--panel);}
   td{color:var(--smoke);}
-  td:first-child{color:var(--gold);white-space:nowrap;}
+  td:first-child{font-family:ui-monospace,"SF Mono",Menlo,monospace;color:var(--gold);white-space:nowrap;font-size:12px;}
   .note{border-left:2px solid var(--gold);padding:10px 18px;background:var(--panel);margin:16px 0;font-size:12.5px;color:var(--smoke);}
   .note b{color:var(--bone);font-weight:400;}
 </style>
@@ -63,7 +63,7 @@
 
 <header>
   <div class="bar">
-    <a class="mark" href="index.html"><span class="sigil">⚖</span><b>HADES</b></a>
+    <a class="mark" href="index.html"><b>HADES</b></a>
     <span class="meta">documentation</span>
   </div>
 </header>
