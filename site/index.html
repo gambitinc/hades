@@ -366,20 +366,46 @@ $ hades deploy → <b>placed on studio</b></div></div>
       setTimeout(() => { ok.textContent = ''; }, 1500);
     });
   });
-  // claims unfold their proof
   // the navbar exists only once you scroll — it animates itself in
   const hdr = document.getElementById('hdr');
   const navWatch = () => hdr.classList.toggle('on', scrollY > innerHeight * 0.22);
   addEventListener('scroll', navWatch, { passive: true });
   navWatch();
 
-  document.querySelectorAll('.show[data-proof]').forEach(el => {
-    el.addEventListener('click', () => {
-      const proof = document.getElementById(el.dataset.proof);
-      const on = proof.classList.toggle('on');
-      el.classList.toggle('on', on);
-    });
-  });
+  // the reading engine: proofs surface around the thesis as you move
+  // through it, and once surfaced they stay
+  const sec = document.getElementById('thesis-sec');
+  const stage = document.getElementById('stage');
+  const order = ['sat-math', 'sat-link', 'sat-naps', 'sat-batt', 'sat-mem', 'sat-fleet'];
+  const at =    [0.10,       0.26,       0.42,       0.58,       0.72,      0.86];
+  const lit = new Set();
+  const light = id => {
+    if (lit.has(id)) return;
+    lit.add(id);
+    document.getElementById(id).classList.add('live');
+    document.querySelectorAll(`.key[data-sat="${id}"]`).forEach(k => k.classList.add('live'));
+  };
+  const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const narrow = matchMedia('(max-width: 980px)').matches;
+  if (calm || narrow) {
+    order.forEach(light);
+  } else {
+    const readWatch = () => {
+      const r = sec.getBoundingClientRect();
+      const span = r.height - innerHeight;
+      const p = Math.min(Math.max(-r.top / Math.max(span, 1), 0), 1);
+      order.forEach((id, i) => { if (p >= at[i]) light(id); });
+    };
+    addEventListener('scroll', readWatch, { passive: true });
+    readWatch();
+    // the satellites drift faintly with the reader's hand
+    stage.addEventListener('pointermove', e => {
+      const mx = (e.clientX / innerWidth - 0.5) * 26;
+      const my = (e.clientY / innerHeight - 0.5) * 18;
+      stage.style.setProperty('--mx', mx + 'px');
+      stage.style.setProperty('--my', my + 'px');
+    }, { passive: true });
+  }
 })();
 </script>
 
