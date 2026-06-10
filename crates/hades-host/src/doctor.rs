@@ -159,19 +159,37 @@ pub async fn run_doctor(
         }
     }
 
-    // 5. Network egress to Cloudflare (tunnels + ntfy need outbound 443).
-    let egress = reqwest::Client::new()
-        .head("https://www.cloudflare.com")
-        .timeout(std::time::Duration::from_secs(5))
-        .send()
-        .await;
-    match egress {
-        Ok(_) => checks.push(Check::pass("egress", "outbound 443 to Cloudflare ok")),
-        Err(e) => checks.push(Check::fail(
+    // 5. Network egress (tunnels + ntfy need outbound 443). A light endpoint,
+    //    a couple of retries, and warn-not-fail: a slow or blocked probe must
+    //    never refuse deploys, which still work (degrading to local URLs) when
+    //    egress is genuinely down. If a tunnel is already up, egress is proven.
+    let client = reqwest::Client::new();
+    let mut egress_ok = false;
+    let mut last_err = String::new();
+    for _ in 0..3 {
+        match client
+            // 1.1.1.1's trace endpoint is a few bytes and answers fast
+            .get("https://1.1.1.1/cdn-cgi/trace")
+            .timeout(std::time::Duration::from_secs(8))
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => {
+                egress_ok = true;
+                break;
+            }
+            Ok(r) => last_err = format!("status {}", r.status()),
+            Err(e) => last_err = e.to_string(),
+        }
+    }
+    if egress_ok {
+        checks.push(Check::pass("egress", "outbound 443 ok"));
+    } else {
+        checks.push(Check::warn(
             "egress",
-            format!("cannot reach cloudflare.com: {e}"),
-            "check network connection / firewall",
-        )),
+            format!("outbound probe failed ({last_err}) — public links may be unavailable; deploys still work with local URLs"),
+            "check network / firewall; if tunnels are serving, this is just a slow probe",
+        ));
     }
 
     // 6. Sleep posture: a host that naps on AC isn't a host.
