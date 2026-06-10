@@ -337,7 +337,7 @@ async fn main() -> ExitCode {
             if json {
                 render::json(&serde_json::json!({ "logged_out": true }));
             } else {
-                println!("logged out — commands now target the local host");
+                println!("logged out; commands now target the local host");
             }
             ExitCode::SUCCESS
         }
@@ -358,7 +358,7 @@ async fn main() -> ExitCode {
                 } else {
                     match &info.url {
                         Some(u) => println!("{u}"),
-                        None => println!("{} (no public URL — local only)", info.local_url),
+                        None => println!("{} (no public URL, local only)", info.local_url),
                     }
                 }
                 ExitCode::SUCCESS
@@ -378,13 +378,13 @@ async fn main() -> ExitCode {
                     } else {
                         println!();
                         println!(
-                            "  updated from {} — v{} → v{}",
+                            "  updated from {}: v{} → v{}",
                             o.source,
                             o.old_version.unwrap_or_else(|| "?".into()),
                             o.new_version
                         );
                         if !o.daemon_restarted {
-                            println!("  daemon did not come back by itself — start hadesd (or check launchd)");
+                            println!("  daemon did not come back by itself; start hadesd (or check launchd)");
                         }
                     }
                     ExitCode::SUCCESS
@@ -399,7 +399,7 @@ async fn main() -> ExitCode {
                 if json {
                     render::json(&r);
                 } else if r.delivered_to.is_empty() {
-                    println!("no channels delivered — run `hades host init` to configure ntfy");
+                    println!("no channels delivered; run `hades host init` to configure ntfy");
                 } else {
                     println!("delivered to: {}", r.delivered_to.join(", "));
                 }
@@ -446,7 +446,7 @@ async fn login(host: Option<String>, token: Option<String>, json: bool) -> ExitC
         Err(_) => {
             return fail(
                 HadesError::DaemonUnreachable(format!(
-                    "no hadesd at {host} — run the install script or `hades host init` first"
+                    "no hadesd at {host}; run the install script or `hades host init` first"
                 )),
                 json,
             )
@@ -484,13 +484,13 @@ async fn login(host: Option<String>, token: Option<String>, json: bool) -> ExitC
         println!();
         println!("  \u{2696} you have entered the underworld");
         println!();
-        println!("  host      {host} — hadesd v{}", health.version);
+        println!("  host      {host} · hadesd v{}", health.version);
         println!(
             "  doctor    {}",
             if health.doctor_green {
-                "GREEN — ready for deploys"
+                "GREEN · ready for deploys"
             } else {
-                "RED — run `hades host doctor` for remedies"
+                "RED · run `hades host doctor` for remedies"
             }
         );
         println!(
@@ -505,7 +505,7 @@ async fn login(host: Option<String>, token: Option<String>, json: bool) -> ExitC
         println!();
         println!("  next:");
         println!("    hades init        scaffold a Hades.toml in your project");
-        println!("    hades deploy      ship it — returns a link");
+        println!("    hades deploy      ship it; returns a link");
         println!("    hades host status the one-screen truth");
         println!();
     }
@@ -524,7 +524,7 @@ async fn host_cmd(cmd: HostCmd, json: bool) -> ExitCode {
             no_launchd,
             healthchecks_url,
         } => {
-            eprintln!("hades host init — bootstrapping this machine as a cloud host…");
+            eprintln!("hades host init: bootstrapping this machine as a cloud host…");
             let report = hades_host::init::run_init(hades_host::init::InitOptions {
                 no_launchd,
                 healthchecks_url,
@@ -539,7 +539,7 @@ async fn host_cmd(cmd: HostCmd, json: bool) -> ExitCode {
                 if let Some(url) = &report.ntfy_subscribe_url {
                     println!();
                     println!("\u{1F4F1} subscribe your phone to host alerts: {url}");
-                    println!("   (install the ntfy app, subscribe to that topic — no account needed)");
+                    println!("   (install the ntfy app, subscribe to that topic, no account needed)");
                 }
                 println!();
                 render::doctor(&report.doctor);
@@ -649,7 +649,7 @@ async fn host_cmd(cmd: HostCmd, json: bool) -> ExitCode {
                 Ok(s) => {
                     let Some(token) = config.auth_token else {
                         return fail(
-                            HadesError::Other("no auth token in config — run `hades host init`".into()),
+                            HadesError::Other("no auth token in config; run `hades host init`".into()),
                             json,
                         );
                     };
@@ -673,7 +673,7 @@ async fn host_cmd(cmd: HostCmd, json: bool) -> ExitCode {
                         }
                         None => fail(
                             HadesError::Other(
-                                "no control tunnel — install cloudflared (`brew install cloudflared`) and restart the daemon".into(),
+                                "no control tunnel; install cloudflared (`brew install cloudflared`) and restart the daemon".into(),
                             ),
                             json,
                         ),
@@ -695,14 +695,14 @@ async fn host_cmd(cmd: HostCmd, json: bool) -> ExitCode {
             let Some(control_url) = status.control_url else {
                 return fail(
                     HadesError::Other(
-                        "this device has no control tunnel yet — install cloudflared and restart the daemon, then re-run join".into(),
+                        "this device has no control tunnel yet; install cloudflared and restart the daemon, then re-run join".into(),
                     ),
                     json,
                 );
             };
             let Some(own_token) = config.auth_token.clone() else {
                 return fail(
-                    HadesError::Other("no auth token in config — run `hades host init`".into()),
+                    HadesError::Other("no auth token in config; run `hades host init`".into()),
                     json,
                 );
             };
@@ -781,14 +781,14 @@ fn scaffold_manifest(json: bool) -> ExitCode {
         .collect::<String>();
 
     let template = format!(
-        r#"# Hades app manifest — `hades deploy` reads this.
+        r#"# Hades app manifest. `hades deploy` reads this.
 [app]
 name = "{dir_name}"
 # Exactly one of `image` (registry image) or [app.build] (local Dockerfile):
 # image = "nginx:alpine"
 ports = [8000]          # first port receives proxied traffic
 replicas = 1
-priority = "normal"     # critical | normal | low — shedding order under pressure
+priority = "normal"     # critical | normal | low (shedding order under pressure)
 # max_concurrent_requests = 64
 
 [app.build]
@@ -961,7 +961,7 @@ fn app_or_manifest(app: Option<String>) -> Result<String, HadesError> {
 fn render_secrets(v: &hades_api::types::SecretsView) {
     let where_ = v.device.as_deref().unwrap_or("local");
     println!(
-        "{} — {} secret{} on {} ({}){}",
+        "{} · {} secret{} on {} ({}){}",
         v.app,
         v.keys.len(),
         if v.keys.len() == 1 { "" } else { "s" },
@@ -1014,7 +1014,7 @@ async fn secrets_cmd(cmd: SecretsCmd, json: bool) -> ExitCode {
                     if json {
                         render::json(&v);
                     } else if v.keys.is_empty() {
-                        println!("{app} has no secrets — `hades secrets set KEY=VALUE --app {app}`");
+                        println!("{app} has no secrets; `hades secrets set KEY=VALUE --app {app}`");
                     } else {
                         render_secrets(&v);
                     }
@@ -1109,7 +1109,7 @@ async fn fleet_cmd(cmd: FleetCmd, json: bool) -> ExitCode {
                 if json {
                     render::json(&view);
                 } else if view.devices.is_empty() {
-                    println!("no devices joined — `hades fleet add` prints what to run on a new machine");
+                    println!("no devices joined; `hades fleet add` prints what to run on a new machine");
                 } else {
                     render::fleet(&view);
                 }
@@ -1142,7 +1142,7 @@ async fn fleet_cmd(cmd: FleetCmd, json: bool) -> ExitCode {
                             if r["started"].as_bool().unwrap_or(false) {
                                 println!("{name}: updating (rebuild + daemon restart; takes a few minutes)");
                             } else {
-                                println!("{name}: failed — {}", r["error"].as_str().unwrap_or("?"));
+                                println!("{name}: failed: {}", r["error"].as_str().unwrap_or("?"));
                             }
                         }
                         println!();
@@ -1197,7 +1197,7 @@ async fn domain_cmd(cmd: DomainCmd, json: bool) -> ExitCode {
                 Err(e) => return fail(e, json),
             };
             eprintln!("claiming {name} for {app}…");
-            match c.domain_claim(&app, &name).await {
+            match c.domain_claim(&app, &name, None, None).await {
                 Ok(claim) => {
                     if json {
                         render::json(&claim);
@@ -1207,7 +1207,7 @@ async fn domain_cmd(cmd: DomainCmd, json: bool) -> ExitCode {
                         println!();
                         println!("    https://{}", claim.hostname);
                         println!();
-                        println!("  this URL is stable — it survives restarts and never rotates.");
+                        println!("  this URL is stable; it survives restarts and never rotates.");
                     }
                     ExitCode::SUCCESS
                 }
@@ -1236,7 +1236,7 @@ async fn domain_cmd(cmd: DomainCmd, json: bool) -> ExitCode {
                 if json {
                     render::json(&list);
                 } else if list.claims.is_empty() {
-                    println!("no claimed domains — `hades domain claim <name>`");
+                    println!("no claimed domains; `hades domain claim <name>`");
                 } else {
                     for cl in &list.claims {
                         println!("{:<16} https://{}", cl.app, cl.hostname);

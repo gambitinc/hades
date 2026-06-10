@@ -85,7 +85,7 @@ pub async fn run_doctor(
                     checks.push(Check::pass(
                         "docker",
                         format!(
-                            "engine up — VM capacity {}MB / {} CPUs (Mac has {}MB; the VM is the real budget)",
+                            "engine up: VM capacity {}MB / {} CPUs (Mac has {}MB; the VM is the real budget)",
                             info.vm_memory_mb, info.vm_cpus, mac_mb
                         ),
                     ));
@@ -114,7 +114,7 @@ pub async fn run_doctor(
         Some(p) => checks.push(Check::pass("cloudflared", p.display().to_string())),
         None => checks.push(Check::warn(
             "cloudflared",
-            "not found — apps will get local URLs only",
+            "not found; apps will get local URLs only",
             "brew install cloudflared",
         )),
     }
@@ -187,7 +187,7 @@ pub async fn run_doctor(
     } else {
         checks.push(Check::warn(
             "egress",
-            format!("outbound probe failed ({last_err}) — public links may be unavailable; deploys still work with local URLs"),
+            format!("outbound probe failed ({last_err}); public links may be unavailable, deploys still work with local URLs"),
             "check network / firewall; if tunnels are serving, this is just a slow probe",
         ));
     }
@@ -197,7 +197,7 @@ pub async fn run_doctor(
         Some(false) => checks.push(Check::pass("sleep", "machine stays awake on AC")),
         Some(true) => checks.push(Check::warn(
             "sleep",
-            "machine sleeps on AC — apps and tunnels die when the lid closes",
+            "machine sleeps on AC; apps and tunnels die when the lid closes",
             "run `sudo pmset -c sleep 0` (and consider `sudo pmset -c disablesleep 1` for clamshell)",
         )),
         None => checks.push(Check::warn(
@@ -220,7 +220,7 @@ pub async fn run_doctor(
             })
             .unwrap_or(false);
         if held {
-            checks.push(Check::pass("keep-awake", "power assertion held — host won't idle-sleep"));
+            checks.push(Check::pass("keep-awake", "power assertion held; host won't idle-sleep"));
         } else {
             checks.push(Check::warn(
                 "keep-awake",
@@ -246,7 +246,7 @@ pub async fn run_doctor(
         )),
         None => checks.push(Check::warn(
             "notify",
-            "no ntfy topic — you won't get pushes when the host misbehaves",
+            "no ntfy topic; you won't get pushes when the host misbehaves",
             "run `hades host init` to generate one",
         )),
     }

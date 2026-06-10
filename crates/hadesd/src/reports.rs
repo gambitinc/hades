@@ -91,38 +91,38 @@ pub fn battery_report(paths: &HadesPaths, days: f64) -> BatteryReport {
     if let Some(dwell) = high_soc_dwell_pct {
         if dwell > 80.0 {
             recommendations.push(format!(
-                "battery sits at >=95% charge {dwell:.0}% of plugged-in time — enable macOS Optimized Battery Charging (or a charge limiter) to cut high-SoC dwell, the main silent degrader for an always-plugged host"
+                "battery sits at >=95% charge {dwell:.0}% of plugged-in time; enable macOS Optimized Battery Charging (or a charge limiter) to cut high-SoC dwell, the main silent degrader for an always-plugged host"
             ));
         }
     }
     if let Some(cpw) = cycles_per_week {
         if cpw > 3.0 {
             recommendations.push(format!(
-                "{cpw:.1} charge cycles/week is high for a plugged-in host — check whether the machine is actually staying on AC"
+                "{cpw:.1} charge cycles/week is high for a plugged-in host; check whether the machine is actually staying on AC"
             ));
         }
     }
     if let Some(t) = avg_temp_c {
         if t > 35.0 {
             recommendations.push(format!(
-                "average battery temperature {t:.1}°C is elevated — heavy container load heats the battery; consider lowering app CPU quotas or improving airflow"
+                "average battery temperature {t:.1}°C is elevated; heavy container load heats the battery, so consider lowering app CPU quotas or improving airflow"
             ));
         }
     }
     if let Some(share) = hades_cpu_share_pct {
         if share > 100.0 {
             recommendations.push(format!(
-                "Hades containers average {share:.0}% CPU — if battery wear matters, schedule heavy apps to pause on battery (power.on_battery = \"pause\")"
+                "Hades containers average {share:.0}% CPU; if battery wear matters, schedule heavy apps to pause on battery (power.on_battery = \"pause\")"
             ));
         }
     }
     if recommendations.is_empty() && n > 0 {
         recommendations
-            .push("no battery red flags in the sample window — keep an eye on capacity trend".into());
+            .push("no battery red flags in the sample window; keep an eye on capacity trend".into());
     }
     if n == 0 {
         recommendations.push(
-            "no battery telemetry yet — the daemon samples every 5 minutes; check back soon (or this is a desktop Mac with no battery)"
+            "no battery telemetry yet; the daemon samples every 5 minutes, so check back soon (or this is a desktop Mac with no battery)"
                 .into(),
         );
     }

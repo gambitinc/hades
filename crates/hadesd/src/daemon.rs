@@ -702,21 +702,25 @@ impl Daemon {
         self: &std::sync::Arc<Self>,
         app: &str,
         name: &str,
+        coord_override: Option<(String, Option<String>)>,
     ) -> Result<crate::state::ClaimRecord, HadesError> {
         if self.store.get(app).is_none() {
             return Err(HadesError::AppNotFound(app.into()));
         }
-        let coord = self
-            .config
-            .domain
-            .coordinator_url
-            .clone()
-            .ok_or_else(|| {
-                HadesError::Other(
-                    "no coordinator configured — set domain.coordinator_url (ask your operator)"
-                        .into(),
-                )
-            })?;
+        // a forwarding hub passes its coordinator down so devices don't need
+        // it configured; otherwise fall back to this host's own config
+        let (coord, coord_secret) = match coord_override {
+            Some((url, secret)) => (url, secret),
+            None => (
+                self.config.domain.coordinator_url.clone().ok_or_else(|| {
+                    HadesError::Other(
+                        "no coordinator configured; set domain.coordinator_url (ask your operator)"
+                            .into(),
+                    )
+                })?,
+                self.config.domain.coordinator_secret.clone(),
+            ),
+        };
         // release any previous claim for this app first
         if self.store.claim_for(app).is_some() {
             let _ = self.domain_release(app).await;
@@ -727,7 +731,7 @@ impl Daemon {
             .http
             .post(format!("{}/claim", coord.trim_end_matches('/')))
             .json(&serde_json::json!({ "name": name, "proxy_url": proxy_url }));
-        if let Some(sec) = &self.config.domain.coordinator_secret {
+        if let Some(sec) = &coord_secret {
             req = req.header("x-hades-secret", sec);
         }
         let resp = req

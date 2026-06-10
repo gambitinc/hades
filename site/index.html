@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HADES — turn a spare laptop into a server</title>
-<meta name="description" content="Turn the spare laptop in your drawer into a real server. No static IP, no port forwarding — an outbound tunnel gives your app a public link. Built for laptops, not datacenters.">
+<title>HADES · turn a spare laptop into a server</title>
+<meta name="description" content="Turn the spare laptop in your drawer into a real server. No static IP, no port forwarding. An outbound tunnel gives your app a public link. Built for laptops, not datacenters.">
 <style>
   :root {
     --void:  #070504;
@@ -287,15 +287,15 @@
     <p class="hint">it will offer to join this machine to your other devices.</p>
 
     <h2>Only deploying? Take the CLI alone.</h2>
-    <p class="why">For the machine you work from — it drives your hosts from
+    <p class="why">For the machine you work from. It drives your hosts from
     anywhere.</p>
     <span class="cmd" data-copy id="cmd-cli"><span class="p">$</span> <span class="t">curl -fsSL https://hades.sh/cli.sh | sh</span> <span class="ok"></span></span>
-    <p class="hint">then <code>hades login --host … --token …</code> — the host prints
+    <p class="hint">then <code>hades login --host … --token …</code>. The host prints
     that line via <code>hades host connect-info</code>.</p>
   </section>
 
   <footer>
-    <b>HADES</b> — host-aware deployment &amp; execution system · <a href="docs.html">docs</a>
+    <b>HADES</b> · host-aware deployment &amp; execution system · <a href="docs.html">docs</a>
   </footer>
 
 </main>
@@ -317,7 +317,7 @@
       setTimeout(() => { ok.textContent = ''; }, 1500);
     });
   });
-  // the navbar exists only once you scroll — it animates itself in
+  // the navbar exists only once you scroll; it animates itself in
   const hdr = document.getElementById('hdr');
   const navWatch = () => hdr.classList.toggle('on', scrollY > innerHeight * 0.22);
   addEventListener('scroll', navWatch, { passive: true });
@@ -492,7 +492,7 @@ if (renderer) {
           float facing = max(dot(N, L), 0.0);
           col += emberDeep * pow(facing, 3.0) * 0.10;
 
-          // tight moving glints — the light snagging on wave faces
+          // tight moving glints, the light snagging on wave faces
           vec3 R = reflect(-L, N);
           float spec = pow(max(dot(R, V), 0.0), 110.0);
           col += emberHot * spec * 1.1;

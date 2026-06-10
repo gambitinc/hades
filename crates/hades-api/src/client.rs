@@ -278,10 +278,23 @@ impl DaemonClient {
             .map_err(|e| ApiError::from(HadesError::Other(e.to_string())))
     }
 
-    pub async fn domain_claim(&self, app: &str, name: &str) -> Result<DomainClaim, ApiError> {
+    pub async fn domain_claim(
+        &self,
+        app: &str,
+        name: &str,
+        coordinator_url: Option<&str>,
+        coordinator_secret: Option<&str>,
+    ) -> Result<DomainClaim, ApiError> {
+        let mut body = serde_json::json!({ "app": app, "name": name });
+        if let Some(u) = coordinator_url {
+            body["coordinator_url"] = u.into();
+        }
+        if let Some(sec) = coordinator_secret {
+            body["coordinator_secret"] = sec.into();
+        }
         Self::check(
             self.auth(self.http.post(format!("{}/domain/claim", self.base)))
-                .json(&serde_json::json!({ "app": app, "name": name }))
+                .json(&body)
                 .timeout(std::time::Duration::from_secs(60))
                 .send()
                 .await,

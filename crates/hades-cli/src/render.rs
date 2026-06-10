@@ -28,9 +28,9 @@ pub fn doctor(report: &DoctorReport) {
     }
     println!();
     if report.green {
-        println!("doctor: GREEN — host is ready for deploys");
+        println!("doctor: GREEN, host is ready for deploys");
     } else {
-        println!("doctor: RED — deploys are refused until the failures above are fixed");
+        println!("doctor: RED, deploys are refused until the failures above are fixed");
     }
 }
 
@@ -52,7 +52,7 @@ pub fn app_line(a: &AppInfo) {
 
 pub fn apps(list: &[AppInfo]) {
     if list.is_empty() {
-        println!("no apps deployed — `hades init` then `hades deploy` to get one running");
+        println!("no apps deployed; `hades init` then `hades deploy` to get one running");
         return;
     }
     println!(
@@ -77,7 +77,7 @@ pub fn deploy(resp: &DeployResponse) {
         Some(url) => println!("  public: {url}"),
         None => {
             if let Some(note) = &resp.tunnel_note {
-                println!("  public: (none) — {note}");
+                println!("  public: (none); {note}");
             } else {
                 println!("  public: provisioning… run `hades url {}` in a few seconds", a.name);
             }
@@ -87,14 +87,14 @@ pub fn deploy(resp: &DeployResponse) {
 
 pub fn host_status(s: &HostStatus) {
     println!(
-        "hadesd v{} — up since {}, doctor {}",
+        "hadesd v{}, up since {}, doctor {}",
         s.daemon_version,
         s.started_at.format("%Y-%m-%d %H:%M UTC"),
         if s.doctor_green { "GREEN" } else { "RED" }
     );
     let l = &s.ledger;
     println!(
-        "capacity: Docker VM {}MB / {} CPUs (Mac has {}MB — the VM is the real budget)",
+        "capacity: Docker VM {}MB / {} CPUs (Mac has {}MB; the VM is the real budget)",
         l.vm_memory_mb, l.vm_cpus, l.mac_memory_mb
     );
     println!(
@@ -122,7 +122,7 @@ pub fn host_status(s: &HostStatus) {
 
 pub fn battery(b: &BatteryReport) {
     println!(
-        "battery report — {} samples over {:.1} days",
+        "battery report: {} samples over {:.1} days",
         b.sample_count, b.sampled_over_days
     );
     if let Some(c) = b.cycle_count {
@@ -219,7 +219,7 @@ pub fn fleet(v: &FleetView) {
 }
 
 pub fn stats(s: &AppStats) {
-    println!("{} — proxy traffic", s.name);
+    println!("{}: proxy traffic", s.name);
     println!(
         "  requests {}  inflight {}  shed {}  p50 {:.1}ms  p95 {:.1}ms",
         s.requests_total, s.inflight, s.shed_total, s.p50_ms, s.p95_ms

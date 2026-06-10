@@ -166,12 +166,12 @@ impl HostEvent {
             AppPaused { app, reason } => format!("{app}: paused ({reason:?})"),
             AppResumed { app } => format!("{app}: resumed"),
             AppOomKilled { app, memory_mb, restarts } => format!(
-                "{app}: OOM-killed at {memory_mb}MB limit (restart #{restarts}) — consider raising resources.memory"
+                "{app}: OOM-killed at {memory_mb}MB limit (restart #{restarts}); consider raising resources.memory"
             ),
             AppCrashLoop { app, restarts } => {
-                format!("{app}: crash loop after {restarts} restarts — restarts stopped")
+                format!("{app}: crash loop after {restarts} restarts; restarts stopped")
             }
-            AppUnhealthy { app, detail } => format!("{app}: unhealthy — {detail}"),
+            AppUnhealthy { app, detail } => format!("{app}: unhealthy: {detail}"),
             UrlChanged { app, new, .. } => format!("{app}: new public URL {new}"),
             TunnelDown { app } => format!("{app}: tunnel down, re-provisioning"),
             MemoryPressure { level, available_mb } => {
@@ -183,9 +183,9 @@ impl HostEvent {
                 "battery health: {capacity_pct:.1}% of design capacity, {cycle_count} cycles"
             ),
             DiskLow { free_gb } => format!("disk low: {free_gb:.1}GB free"),
-            DeployRejected { app, reason } => format!("{app}: deploy rejected — {reason}"),
+            DeployRejected { app, reason } => format!("{app}: deploy rejected: {reason}"),
             DoctorRed { failed_checks } => {
-                format!("doctor red: {} — deploys refused", failed_checks.join(", "))
+                format!("doctor red: {}; deploys refused", failed_checks.join(", "))
             }
         }
     }

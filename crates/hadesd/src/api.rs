@@ -73,7 +73,7 @@ async fn require_auth(
     } else {
         err_response(
             &HadesError::Unauthorized(
-                "missing or invalid token — get the login command from `hades host connect-info` on the host".into(),
+                "missing or invalid token; get the login command from `hades host connect-info` on the host".into(),
             ),
             None,
         )
@@ -402,17 +402,32 @@ async fn fleet_update(State(d): State<D>) -> Response {
 struct ClaimBody {
     app: String,
     name: String,
+    #[serde(default)]
+    coordinator_url: Option<String>,
+    #[serde(default)]
+    coordinator_secret: Option<String>,
 }
 
 async fn domain_claim(State(d): State<D>, Json(b): Json<ClaimBody>) -> Response {
-    // an app placed on a fleet device claims through that device
+    // an app placed on a fleet device claims through that device — and the
+    // hub injects its own coordinator so the device needs no config of its own
     if let Some((_dev, client)) = remote_for(&d, &b.app) {
-        return match client.domain_claim(&b.app, &b.name).await {
+        let cu = d.config.domain.coordinator_url.clone();
+        let cs = d.config.domain.coordinator_secret.clone();
+        return match client
+            .domain_claim(&b.app, &b.name, cu.as_deref(), cs.as_deref())
+            .await
+        {
             Ok(c) => Json(c).into_response(),
             Err(e) => err_response(&e.error, None),
         };
     }
-    match d.domain_claim(&b.app, &b.name).await {
+    // a forwarded claim carries the hub's coordinator in the body; prefer it
+    let override_ = b
+        .coordinator_url
+        .clone()
+        .map(|u| (u, b.coordinator_secret.clone()));
+    match d.domain_claim(&b.app, &b.name, override_).await {
         Ok(rec) => Json(hades_api::types::DomainClaim {
             app: rec.app,
             name: rec.name,
@@ -462,7 +477,7 @@ async fn host_ssh(State(d): State<D>) -> Response {
     if !sshd_up {
         return err_response(
             &HadesError::Other(
-                "Remote Login is off on this machine — System Settings → General → Sharing → Remote Login".into(),
+                "Remote Login is off on this machine; System Settings → General → Sharing → Remote Login".into(),
             ),
             None,
         );
@@ -752,7 +767,7 @@ async fn notify_test(State(d): State<D>) -> Json<NotifyTestResponse> {
         .notifiers
         .send(&hades_sentinel::Notification {
             title: "hades".into(),
-            body: "test notification — your host can reach you".into(),
+            body: "test notification: your host can reach you".into(),
             severity: hades_core::events::Severity::Urgent,
         })
         .await;

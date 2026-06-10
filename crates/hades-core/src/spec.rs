@@ -75,7 +75,7 @@ impl AppSpec {
         }
         if self.resources.memory_mb == 0 {
             return Err(HadesError::InvalidSpec(
-                "resources.memory is mandatory (e.g. \"256mb\") — admission control needs a declared number".into(),
+                "resources.memory is mandatory (e.g. \"256mb\"); admission control needs a declared number".into(),
             ));
         }
         if self.replicas == 0 {

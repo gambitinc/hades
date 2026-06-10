@@ -121,17 +121,17 @@ pub async fn run(from: Option<String>, progress: impl Fn(&str)) -> Result<Update
         extract_tar_gz(&bytes, &managed_src, 0)?;
         (managed_src.clone(), format!("hub {hub}"))
     } else if is_checkout(&managed_src) {
-        progress("no update source — rebuilding ~/.hades/src as-is");
+        progress("no update source; rebuilding ~/.hades/src as-is");
         (managed_src.clone(), "existing sources".into())
     } else {
         return Err(HadesError::Other(
-            "nowhere to update from — run inside a checkout, join a fleet, or pass --from <site-url>"
+            "nowhere to update from; run inside a checkout, join a fleet, or pass --from <site-url>"
                 .into(),
         ));
     };
 
     // ── 2 · build ──────────────────────────────────────────────────────
-    progress("building (release) — a few minutes if the cache is cold");
+    progress("building (release); a few minutes if the cache is cold");
     let cargo = if Command::new("cargo").arg("--version").output().is_ok() {
         "cargo".to_string()
     } else {

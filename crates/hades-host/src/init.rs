@@ -114,7 +114,7 @@ pub async fn run_init(opts: InitOptions) -> InitReport {
         detail: if docker_ok {
             "engine reachable".into()
         } else {
-            "engine not reachable — install/start Docker Desktop (`brew install --cask docker`, then `open -a Docker`) or colima".into()
+            "engine not reachable; install/start Docker Desktop (`brew install --cask docker`, then `open -a Docker`) or colima".into()
         },
     });
 
@@ -125,7 +125,7 @@ pub async fn run_init(opts: InitOptions) -> InitReport {
         ok: true, // never blocks init
         detail: match &cf {
             Some(p) => format!("found at {}", p.display()),
-            None => "not found — public URLs disabled until `brew install cloudflared`".into(),
+            None => "not found; public URLs disabled until `brew install cloudflared`".into(),
         },
     });
 
@@ -140,7 +140,7 @@ pub async fn run_init(opts: InitOptions) -> InitReport {
         Some(true) => steps.push(InitStep {
             name: "power".into(),
             ok: true, // warn, not block
-            detail: "machine sleeps on AC — run `sudo pmset -c sleep 0` so your host doesn't nap (needs sudo, so we won't do it for you)".into(),
+            detail: "machine sleeps on AC; run `sudo pmset -c sleep 0` so your host doesn't nap (needs sudo, so we won't do it for you)".into(),
         }),
         None => steps.push(InitStep {
             name: "power".into(),
@@ -176,7 +176,7 @@ pub async fn run_init(opts: InitOptions) -> InitReport {
             None => steps.push(InitStep {
                 name: "launchd".into(),
                 ok: false,
-                detail: "hadesd binary not found next to hades — build with `cargo build --workspace` or reinstall".into(),
+                detail: "hadesd binary not found next to hades; build with `cargo build --workspace` or reinstall".into(),
             }),
         }
     }
@@ -197,7 +197,7 @@ pub async fn run_init(opts: InitOptions) -> InitReport {
             detail: if up {
                 format!("hadesd healthy on 127.0.0.1:{}", config.api_port)
             } else {
-                "daemon did not become healthy within 10s — check `~/.hades/logs/hadesd.err.log`".into()
+                "daemon did not become healthy within 10s; check `~/.hades/logs/hadesd.err.log`".into()
             },
         });
     }
