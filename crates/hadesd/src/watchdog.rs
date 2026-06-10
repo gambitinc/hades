@@ -202,6 +202,22 @@ async fn sample_and_pressure(d: &Arc<Daemon>) {
             available_mb,
         });
     }
+
+    // Continuously (not just on a transition) resume anything we paused for
+    // memory pressure once there's headroom again. The transition event can
+    // be missed across a daemon restart, which would otherwise leave apps
+    // paused forever; this self-heals that.
+    if level == PressureLevel::Normal {
+        for (name, rec) in d.store.snapshot() {
+            if rec.state == AppState::Paused
+                && rec.paused_reason == Some(hades_core::events::PauseReason::MemoryPressure)
+            {
+                if let Err(e) = d.resume_app(&name).await {
+                    tracing::warn!(app = %name, "pressure-resume failed: {e}");
+                }
+            }
+        }
+    }
 }
 
 /// Available memory in MB. sysinfo first; on macOS it sometimes reports 0,
