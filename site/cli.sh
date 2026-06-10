@@ -19,7 +19,7 @@ printf "\n  ${RED}HADES${OFF} ${DIM}— the CLI alone${OFF}\n\n"
 
 # sources: local checkout → existing → tarball from this origin → git
 ORIGIN="__ORIGIN__"
-REPO="${HADES_REPO:-https://github.com/dhilanshah/hades}"
+REPO="${HADES_REPO:-https://github.com/gambitinc/hades}"
 SRC="${HADES_SRC:-$HOME/.hades/src}"
 if [ -f "./Cargo.toml" ] && grep -q 'hades-cli' ./Cargo.toml 2>/dev/null; then
   SRC="$(pwd)"

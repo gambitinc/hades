@@ -23,7 +23,7 @@ printf "\n  ${RED}HADES${OFF} ${DIM}— the underworld, installed${OFF}\n\n"
 # tarball from the host that served this script → git clone.
 # __ORIGIN__ is templated in by the hades host serving this file.
 ORIGIN="__ORIGIN__"
-REPO="${HADES_REPO:-https://github.com/dhilanshah/hades}"
+REPO="${HADES_REPO:-https://github.com/gambitinc/hades}"
 SRC="${HADES_SRC:-$HOME/.hades/src}"
 if [ -f "./Cargo.toml" ] && grep -q 'hades-cli' ./Cargo.toml 2>/dev/null; then
   SRC="$(pwd)"
