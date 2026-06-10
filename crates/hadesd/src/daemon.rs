@@ -45,6 +45,8 @@ pub struct Daemon {
     pub fleet_status: Mutex<crate::fleet::FleetStatusMap>,
     /// Per-app secret store (keychain-encrypted where available).
     pub secrets: crate::secrets::SecretStore,
+    /// Long-lived ssh:// tunnel for `hades ssh`, spawned on first use.
+    pub ssh_tunnel: tokio::sync::Mutex<Option<hades_tunnel::Tunnel>>,
 }
 
 impl Daemon {

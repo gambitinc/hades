@@ -297,6 +297,7 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
         <tr><td>hades fleet remove &lt;name&gt;</td><td>drop a device from the registry</td></tr>
         <tr><td>hades update [--from &lt;url&gt;]</td><td>self-update: refresh source (checkout › git › your hub › --from), rebuild, swap binaries, restart the daemon</td></tr>
         <tr><td>hades fleet update</td><td>every joined device self-updates, pulling source from this hub</td></tr>
+        <tr><td>hades ssh &lt;device&gt; [--user]</td><td>shell into a fleet device — hades opens an ssh:// tunnel, auth stays plain ssh (Remote Login must be on there)</td></tr>
         <tr><td>hades init</td><td>scaffold a Hades.toml in the current directory</td></tr>
         <tr><td>hades deploy [--app] [--dir] [--device]</td><td>idempotent upsert: build/pull, health-gate, swap routes, print the link</td></tr>
         <tr><td>hades apps list</td><td>all apps with state, replicas, memory, URLs</td></tr>

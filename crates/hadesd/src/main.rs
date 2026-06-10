@@ -139,6 +139,7 @@ async fn main() {
         http: reqwest::Client::new(),
         fleet_status: Mutex::new(Default::default()),
         secrets: secrets::SecretStore::open(&paths.root),
+        ssh_tunnel: tokio::sync::Mutex::new(None),
         runtime,
         bus: bus.clone(),
         config: config.clone(),

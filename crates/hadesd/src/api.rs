@@ -97,6 +97,8 @@ pub fn router(d: D) -> Router {
         .route("/host/ps", get(ps))
         .route("/host/src", get(host_src))
         .route("/host/update", post(host_update))
+        .route("/host/ssh", post(host_ssh))
+        .route("/fleet/devices/{name}/ssh", post(fleet_ssh))
         .route("/fleet", get(fleet_list))
         .route("/fleet/devices", post(fleet_join))
         .route("/fleet/devices/{name}", delete(fleet_remove))
@@ -388,6 +390,65 @@ async fn fleet_update(State(d): State<D>) -> Response {
         results.insert(dev.name.clone(), r);
     }
     Json(serde_json::json!({ "devices": results })).into_response()
+}
+
+/// Open (or reuse) an ssh:// tunnel to this machine's sshd. The tunnel is
+/// only a road — authentication stays plain old ssh against this Mac's
+/// user accounts.
+async fn host_ssh(State(d): State<D>) -> Response {
+    let sshd_up = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        tokio::net::TcpStream::connect(("127.0.0.1", 22)),
+    )
+    .await
+    .map(|r| r.is_ok())
+    .unwrap_or(false);
+    if !sshd_up {
+        return err_response(
+            &HadesError::Other(
+                "Remote Login is off on this machine — System Settings → General → Sharing → Remote Login".into(),
+            ),
+            None,
+        );
+    }
+    let Some(provider) = d.provider.as_ref() else {
+        return err_response(
+            &HadesError::Tunnel("cloudflared not installed on this host".into()),
+            None,
+        );
+    };
+    let mut slot = d.ssh_tunnel.lock().await;
+    let reusable = slot.as_mut().map(|t| t.alive()).unwrap_or(false);
+    let url = if reusable {
+        slot.as_ref().unwrap().url.clone()
+    } else {
+        match provider.provision_raw("__ssh", "ssh://localhost:22").await {
+            Ok(t) => {
+                if let Some(pid) = t.pid {
+                    d.store.update_registry(|r| {
+                        r.cloudflared.insert("__ssh".into(), pid);
+                    });
+                }
+                let url = t.url.clone();
+                *slot = Some(t);
+                url
+            }
+            Err(e) => return err_response(&e, None),
+        }
+    };
+    let user = std::env::var("USER").unwrap_or_default();
+    Json(serde_json::json!({ "url": url, "user_hint": user })).into_response()
+}
+
+/// Hub side: ask a joined device to open its ssh tunnel.
+async fn fleet_ssh(State(d): State<D>, Path(name): Path<String>) -> Response {
+    let Some(client) = d.device_client(&name) else {
+        return err_response(&HadesError::AppNotFound(format!("device {name}")), None);
+    };
+    match client.host_ssh().await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => err_response(&e.error, None),
+    }
 }
 
 async fn fleet_join(

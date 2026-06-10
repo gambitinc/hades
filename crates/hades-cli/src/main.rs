@@ -99,6 +99,16 @@ enum Cmd {
         #[arg(long)]
         days: Option<f64>,
     },
+    /// SSH into one of your fleet devices. Hades opens the road (an ssh://
+    /// tunnel via the device's daemon); authentication is plain ssh against
+    /// that machine's user accounts. Requires Remote Login enabled there.
+    Ssh {
+        /// Device name (as shown by `hades fleet`).
+        device: String,
+        /// Username on the remote machine (default: its daemon's user).
+        #[arg(long)]
+        user: Option<String>,
+    },
     /// Update hades on this machine: refresh source (checkout > git >
     /// your hub > --from), rebuild, swap binaries, restart the daemon.
     Update {
@@ -306,6 +316,7 @@ async fn main() -> ExitCode {
             }
             Err(e) => fail(e, json),
         },
+        Cmd::Ssh { device, user } => ssh_cmd(device, user, json).await,
         Cmd::Update { from } => {
             match update::run(from, |msg| eprintln!("  ◆ {msg}")).await {
                 Ok(o) => {
@@ -940,6 +951,60 @@ async fn secrets_cmd(cmd: SecretsCmd, json: bool) -> ExitCode {
             }
         }
     }
+}
+
+/// Open the device's ssh tunnel through the hub, then hand this terminal
+/// to ssh with cloudflared as the transport.
+async fn ssh_cmd(device: String, user: Option<String>, json: bool) -> ExitCode {
+    // ssh needs cloudflared locally as the ProxyCommand
+    let cf_ok = std::process::Command::new("which")
+        .arg("cloudflared")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+        || std::path::Path::new("/opt/homebrew/bin/cloudflared").exists();
+    if !cf_ok {
+        return fail(
+            HadesError::Other("cloudflared is needed locally for the transport: brew install cloudflared".into()),
+            json,
+        );
+    }
+    let v = match client().fleet_ssh(&device).await {
+        Ok(v) => v,
+        Err(e) => return fail(e, json),
+    };
+    let Some(url) = v["url"].as_str() else {
+        return fail(HadesError::Other("device returned no tunnel url".into()), json);
+    };
+    let host = url.trim_start_matches("https://").trim_start_matches("http://");
+    let user = user
+        .or_else(|| v["user_hint"].as_str().map(String::from).filter(|u| !u.is_empty()))
+        .unwrap_or_else(|| std::env::var("USER").unwrap_or_else(|_| "root".into()));
+
+    if json {
+        // agents get the connection recipe instead of an interactive session
+        render::json(&serde_json::json!({
+            "device": device, "host": host, "user": user,
+            "command": format!(
+                "ssh -o ProxyCommand='cloudflared access ssh --hostname %h' {user}@{host}"
+            ),
+        }));
+        return ExitCode::SUCCESS;
+    }
+
+    eprintln!("  ⚖ road open: {host}");
+    eprintln!("    connecting as {user} (auth is that machine's own login)
+");
+    use std::os::unix::process::CommandExt;
+    let err = std::process::Command::new("ssh")
+        .arg("-o")
+        .arg("ProxyCommand=cloudflared access ssh --hostname %h")
+        .arg("-o")
+        .arg("StrictHostKeyChecking=accept-new")
+        .arg(format!("{user}@{host}"))
+        .exec(); // replaces this process; only returns on failure
+    eprintln!("error: could not exec ssh: {err}");
+    ExitCode::from(1)
 }
 
 async fn fleet_cmd(cmd: FleetCmd, json: bool) -> ExitCode {

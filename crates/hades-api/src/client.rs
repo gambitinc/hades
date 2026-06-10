@@ -278,6 +278,31 @@ impl DaemonClient {
             .map_err(|e| ApiError::from(HadesError::Other(e.to_string())))
     }
 
+    /// Open an ssh tunnel on this host (returns {url, user_hint}).
+    pub async fn host_ssh(&self) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/host/ssh", self.base)))
+                .timeout(std::time::Duration::from_secs(90))
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    /// Ask a joined device (via the hub) to open its ssh tunnel.
+    pub async fn fleet_ssh(&self, device: &str) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(
+                self.http
+                    .post(format!("{}/fleet/devices/{device}/ssh", self.base)),
+            )
+            .timeout(std::time::Duration::from_secs(90))
+            .send()
+            .await,
+        )
+        .await
+    }
+
     /// Hub-side fan-out: every joined device self-updates from this hub.
     pub async fn fleet_update(&self) -> Result<serde_json::Value, ApiError> {
         Self::check(

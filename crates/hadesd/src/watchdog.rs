@@ -265,8 +265,8 @@ pub async fn reap(d: &Arc<Daemon>) {
 
     let reg = d.store.registry_snapshot();
     for (app, pid) in reg.cloudflared {
-        // "__control" is the daemon's own API tunnel, not an app's
-        if app != "__control" && !apps.contains_key(&app) {
+        // "__"-prefixed entries are the daemon's own tunnels (control, ssh)
+        if !app.starts_with("__") && !apps.contains_key(&app) {
             tracing::info!(app, pid, "reaping orphan cloudflared");
             let _ = std::process::Command::new("kill")
                 .args(["-9", &pid.to_string()])

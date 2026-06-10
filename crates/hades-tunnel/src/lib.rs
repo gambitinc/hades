@@ -33,6 +33,11 @@ impl Tunnel {
     pub async fn kill(&mut self) {
         let _ = self.child.kill().await;
     }
+
+    /// Still running? (used to reuse long-lived utility tunnels)
+    pub fn alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
 }
 
 /// Locate cloudflared: $PATH, then the usual Homebrew prefixes.
@@ -74,13 +79,15 @@ impl QuickTunnelProvider {
     /// Spawn a quick tunnel pointed at the local proxy port and scrape the
     /// assigned trycloudflare hostname from cloudflared's startup output.
     pub async fn provision(&self, app: &str, local_port: u16) -> Result<Tunnel, HadesError> {
+        self.provision_raw(app, &format!("http://localhost:{local_port}"))
+            .await
+    }
+
+    /// Same, for arbitrary protocols cloudflared understands — e.g.
+    /// `ssh://localhost:22` for `hades ssh`.
+    pub async fn provision_raw(&self, app: &str, target: &str) -> Result<Tunnel, HadesError> {
         let mut child = Command::new(&self.binary)
-            .args([
-                "tunnel",
-                "--no-autoupdate",
-                "--url",
-                &format!("http://localhost:{local_port}"),
-            ])
+            .args(["tunnel", "--no-autoupdate", "--url", target])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
