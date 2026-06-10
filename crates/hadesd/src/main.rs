@@ -140,6 +140,10 @@ async fn main() {
         fleet_status: Mutex::new(Default::default()),
         secrets: secrets::SecretStore::open(&paths.root),
         ssh_tunnel: tokio::sync::Mutex::new(None),
+        proxy_metrics: std::sync::Arc::new(hades_proxy::Metrics::default()),
+        upload_mbps: Mutex::new(None),
+        req_per_sec: Mutex::new(0.0),
+        fleet_events: Mutex::new(Vec::new()),
         runtime,
         bus: bus.clone(),
         config: config.clone(),
@@ -263,9 +267,51 @@ async fn main() {
     {
         let table = d.table.clone();
         let port = config.proxy_port;
+        let metrics = d.proxy_metrics.clone();
         tokio::spawn(async move {
-            if let Err(e) = hades_proxy::run_proxy(table, port).await {
+            if let Err(e) = hades_proxy::run_proxy(table, port, metrics).await {
                 tracing::error!("proxy died: {e}");
+            }
+        });
+    }
+
+    // --- dashboard data: req/s sampler (1Hz) + bandwidth probe (periodic) ---
+    {
+        let d2 = d.clone();
+        tokio::spawn(async move {
+            let mut last = d2.proxy_metrics.snapshot().0;
+            let mut tick = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                tick.tick().await;
+                let now = d2.proxy_metrics.snapshot().0;
+                *d2.req_per_sec.lock().unwrap() = now.saturating_sub(last) as f64;
+                last = now;
+            }
+        });
+    }
+    {
+        let d2 = d.clone();
+        tokio::spawn(async move {
+            // measure upstream throughput by POSTing a few MB to Cloudflare's
+            // speed backend and timing it; the network is the real ceiling on
+            // how many requests a home host can serve.
+            let http = reqwest::Client::new();
+            let payload = vec![0u8; 4 * 1024 * 1024]; // 4 MB
+            loop {
+                let start = std::time::Instant::now();
+                let ok = http
+                    .post("https://speed.cloudflare.com/__up")
+                    .body(payload.clone())
+                    .timeout(Duration::from_secs(30))
+                    .send()
+                    .await
+                    .is_ok();
+                if ok {
+                    let secs = start.elapsed().as_secs_f64().max(0.001);
+                    let mbps = (payload.len() as f64 * 8.0) / 1_000_000.0 / secs;
+                    *d2.upload_mbps.lock().unwrap() = Some(mbps);
+                }
+                tokio::time::sleep(Duration::from_secs(180)).await;
             }
         });
     }
@@ -280,6 +326,40 @@ async fn main() {
     // --- background loops ---
     tokio::spawn(watchdog::run(d.clone()));
     tokio::spawn(fleet::poll(d.clone()));
+
+    // fleet-log aggregator: pull each device's recent events every 5s so the
+    // dashboard can show a combined fleet feed without hammering devices.
+    {
+        let d2 = d.clone();
+        tokio::spawn(async move {
+            loop {
+                let fleet = d2.store.fleet_snapshot();
+                let mut merged: Vec<serde_json::Value> = Vec::new();
+                for dev in &fleet.devices {
+                    let client = hades_api::DaemonClient::for_host(
+                        &dev.control_url,
+                        Some(dev.token.clone()),
+                    );
+                    if let Ok(evs) = client.recent_events(1.0).await {
+                        for e in evs.into_iter().rev().take(20) {
+                            merged.push(serde_json::json!({
+                                "at": e.at,
+                                "type": serde_json::to_value(&e.event).ok()
+                                    .and_then(|v| v.get("type").cloned())
+                                    .unwrap_or_default(),
+                                "summary": e.event.summary(),
+                                "device": dev.name,
+                            }));
+                        }
+                    }
+                }
+                merged.sort_by(|a, b| b["at"].as_str().cmp(&a["at"].as_str()));
+                merged.truncate(40);
+                *d2.fleet_events.lock().unwrap() = merged;
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        });
+    }
     tokio::spawn(power::run(d.clone()));
 
     // uptime heartbeat + live sleep detection

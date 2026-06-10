@@ -56,6 +56,9 @@ enum Cmd {
     },
     /// Forget the current session (next commands talk to the local host).
     Logout,
+    /// Open the live fleet dashboard in your browser (served from the local
+    /// daemon at localhost). Works on any machine in the fleet.
+    Dashboard,
     /// Scaffold a Hades.toml in the current directory.
     Init,
     /// Deploy the app described by ./Hades.toml (idempotent upsert). Prints the link.
@@ -332,6 +335,21 @@ async fn main() -> ExitCode {
     match cli.cmd {
         Cmd::Host { cmd } => host_cmd(cmd, json).await,
         Cmd::Login { host, token } => login(host, token, json).await,
+        Cmd::Dashboard => {
+            let paths = HadesPaths::new();
+            let config = HadesConfig::load_or_default(&paths.config());
+            let token = config.auth_token.clone().unwrap_or_default();
+            let url = format!("http://127.0.0.1:{}/dashboard#{}", config.api_port, token);
+            // token rides in the URL fragment, which browsers never send to a
+            // server, so it stays on this machine
+            let _ = std::process::Command::new("open").arg(&url).status();
+            if json {
+                render::json(&serde_json::json!({ "dashboard": url }));
+            } else {
+                println!("opening the dashboard: http://127.0.0.1:{}/dashboard", config.api_port);
+            }
+            ExitCode::SUCCESS
+        }
         Cmd::Logout => {
             let _ = std::fs::remove_file(session_path());
             if json {

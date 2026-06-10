@@ -420,6 +420,24 @@ impl DaemonClient {
     }
 }
 
+impl DaemonClient {
+    /// Fetch a host's recent events (parsed), for the fleet dashboard.
+    pub async fn recent_events(
+        &self,
+        days: f64,
+    ) -> Result<Vec<hades_core::EventEnvelope>, ApiError> {
+        let resp = self.events(false, Some(days)).await?;
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| ApiError::from(hades_core::HadesError::Other(e.to_string())))?;
+        Ok(body
+            .lines()
+            .filter_map(|l| serde_json::from_str::<hades_core::EventEnvelope>(l).ok())
+            .collect())
+    }
+}
+
 /// Parse one NDJSON line into an event envelope (helper for CLI rendering).
 pub fn parse_event_line(line: &str) -> Option<EventEnvelope> {
     serde_json::from_str(line).ok()

@@ -81,7 +81,9 @@ async fn require_auth(
 }
 
 pub fn router(d: D) -> Router {
-    let open = Router::new().route("/health", get(health));
+    let open = Router::new()
+        .route("/health", get(health))
+        .route("/dashboard", get(dashboard_page));
     let protected = Router::new()
         .route("/apps", post(deploy).get(list_apps))
         .route("/apps/{name}", get(get_app))
@@ -98,6 +100,7 @@ pub fn router(d: D) -> Router {
         .route("/host/src", get(host_src))
         .route("/host/update", post(host_update))
         .route("/host/ssh", post(host_ssh))
+        .route("/dashboard/metrics", get(dashboard_metrics))
         .route("/domain/claim", post(domain_claim))
         .route("/domain/claim/{app}", delete(domain_release))
         .route("/domain/claims", get(domain_claims))
@@ -464,6 +467,132 @@ async fn domain_claims(State(d): State<D>) -> Json<hades_api::types::DomainClaim
         .collect();
     claims.sort_by(|a, b| a.app.cmp(&b.app));
     Json(hades_api::types::DomainClaimList { claims })
+}
+
+async fn dashboard_page() -> Response {
+    Response::builder()
+        .header("content-type", "text/html; charset=utf-8")
+        .body(Body::from(include_str!("dashboard.html")))
+        .unwrap()
+}
+
+fn short_hostname() -> String {
+    std::process::Command::new("hostname")
+        .arg("-s")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "host".into())
+}
+
+/// Read the last `n` events from the local ledger, with summaries.
+fn local_events(d: &D, n: usize) -> Vec<serde_json::Value> {
+    let raw = std::fs::read_to_string(d.paths.events_ledger()).unwrap_or_default();
+    let mut out: Vec<serde_json::Value> = raw
+        .lines()
+        .rev()
+        .take(n)
+        .filter_map(|l| serde_json::from_str::<hades_core::EventEnvelope>(l).ok())
+        .map(|e| {
+            serde_json::json!({
+                "at": e.at,
+                "type": serde_json::to_value(&e.event).ok()
+                    .and_then(|v| v.get("type").cloned()).unwrap_or_default(),
+                "summary": e.event.summary(),
+            })
+        })
+        .collect();
+    out.reverse(); // oldest first so the log reads top-down then we autoscroll
+    out
+}
+
+async fn dashboard_metrics(State(d): State<D>) -> Response {
+    let ledger = d.resource_ledger().await.ok();
+    let (req_total, byte_total, inflight) = d.proxy_metrics.snapshot();
+
+    // capacity: the network is usually the binding constraint, so req/s ≈
+    // upstream bytes/sec divided by the average response size, capped by a
+    // rough CPU ceiling.
+    let avg_resp = if req_total > 0 {
+        (byte_total as f64 / req_total as f64).max(200.0)
+    } else {
+        30_000.0
+    };
+    let upload_mbps = *d.upload_mbps.lock().unwrap();
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let cpu_cap = cores as f64 * 8000.0;
+    let net_cap = upload_mbps.map(|m| (m * 1_000_000.0 / 8.0) / avg_resp);
+    let (capacity, cpu_bound) = match net_cap {
+        Some(n) => (Some(n.min(cpu_cap)), cpu_cap < n),
+        None => (None, false),
+    };
+
+    use hades_host::HostProbe;
+    let probe = hades_host::MacProbe;
+    let power = probe.power();
+    let health = probe.battery_health();
+
+    let week = chrono::Utc::now() - chrono::Duration::days(7);
+    let fleet = d.fleet_view();
+    let is_hub = d.config.fleet.hub_url.is_none();
+    let self_healthy = d.doctor_green.load(Ordering::Relaxed);
+
+    // device rows: this machine first, then the joined devices
+    let mut devices = vec![serde_json::json!({
+        "name": short_hostname(),
+        "is_self": true,
+        "healthy": self_healthy,
+        "free_mb": ledger.as_ref().map(|l| l.allocatable_mb.saturating_sub(l.allocated_mb)),
+        "apps": d.store.snapshot().len(),
+        "last_seen": "now",
+    })];
+    let mut healthy_count = if self_healthy { 1 } else { 0 };
+    for dev in &fleet.devices {
+        if dev.healthy { healthy_count += 1; }
+        devices.push(serde_json::json!({
+            "name": dev.name,
+            "is_self": false,
+            "healthy": dev.healthy,
+            "free_mb": dev.free_mb,
+            "apps": dev.apps,
+            "last_seen": dev.last_seen.map(|t| t.format("%H:%M:%S").to_string()),
+        }));
+    }
+
+    let body = serde_json::json!({
+        "machine": {
+            "name": short_hostname(),
+            "is_hub": is_hub,
+            "uptime_pct_7d": d.ledger.availability_pct(week),
+            "started": d.started_at.format("%Y-%m-%d %H:%M UTC").to_string(),
+            "doctor_green": self_healthy,
+            "on_ac": power.as_ref().map(|p| p.on_ac).unwrap_or(true),
+            "battery_pct": power.and_then(|p| p.battery_pct),
+            "capacity_pct_of_design": health.and_then(|h| h.capacity_pct_of_design()),
+            "allocated_mb": ledger.as_ref().map(|l| l.allocated_mb).unwrap_or(0),
+            "allocatable_mb": ledger.as_ref().map(|l| l.allocatable_mb).unwrap_or(0),
+            "apps": d.store.snapshot().len(),
+        },
+        "capacity": {
+            "req_per_sec": capacity,
+            "cpu_bound": cpu_bound,
+            "upload_mbps": upload_mbps,
+            "avg_response_kb": avg_resp / 1024.0,
+            "cpu_cores": cores,
+            "current_req_per_sec": *d.req_per_sec.lock().unwrap(),
+            "inflight": inflight,
+            "total_requests": req_total,
+        },
+        "fleet": {
+            "count": fleet.devices.len() + 1,
+            "healthy": healthy_count,
+            "devices": devices,
+        },
+        "machine_events": local_events(&d, 40),
+        "fleet_events": *d.fleet_events.lock().unwrap(),
+    });
+    Json(body).into_response()
 }
 
 async fn host_ssh(State(d): State<D>) -> Response {

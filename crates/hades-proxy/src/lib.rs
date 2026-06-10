@@ -21,6 +21,25 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 
 const LATENCY_WINDOW: usize = 1024;
 
+/// Process-wide proxy throughput, read by the dashboard. Cumulative counters;
+/// the daemon samples them once a second to derive the live request rate.
+#[derive(Default)]
+pub struct Metrics {
+    pub requests: AtomicU64,
+    pub bytes: AtomicU64,
+    pub inflight: AtomicU32,
+}
+
+impl Metrics {
+    pub fn snapshot(&self) -> (u64, u64, u32) {
+        (
+            self.requests.load(Ordering::Relaxed),
+            self.bytes.load(Ordering::Relaxed),
+            self.inflight.load(Ordering::Relaxed),
+        )
+    }
+}
+
 /// Per-app routing state shared by all of its hostnames.
 pub struct AppRoute {
     pub app: String,
@@ -192,6 +211,7 @@ async fn handle(
     req: Request<Incoming>,
     table: RouteTable,
     client: ProxyClient,
+    metrics: Arc<Metrics>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     let host = req
         .headers()
@@ -221,6 +241,8 @@ async fn handle(
 
     route.inflight.fetch_add(1, Ordering::Relaxed);
     route.requests.fetch_add(1, Ordering::Relaxed);
+    metrics.requests.fetch_add(1, Ordering::Relaxed);
+    metrics.inflight.fetch_add(1, Ordering::Relaxed);
     let started = Instant::now();
 
     let (mut parts, body) = req.into_parts();
@@ -236,10 +258,22 @@ async fn handle(
     let result = client.request(Request::from_parts(parts, body)).await;
 
     route.inflight.fetch_sub(1, Ordering::Relaxed);
+    metrics.inflight.fetch_sub(1, Ordering::Relaxed);
     route.record_latency(started.elapsed().as_secs_f64() * 1000.0);
 
     match result {
-        Ok(resp) => Ok(resp.map(|b| b.boxed())),
+        Ok(resp) => {
+            // count response body bytes when the upstream declares a length
+            if let Some(len) = resp
+                .headers()
+                .get(hyper::header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+            {
+                metrics.bytes.fetch_add(len, Ordering::Relaxed);
+            }
+            Ok(resp.map(|b| b.boxed()))
+        }
         Err(e) => {
             tracing::warn!(app = %route.app, backend = %backend, "proxy upstream error: {e}");
             Ok(empty_response(StatusCode::BAD_GATEWAY))
@@ -248,7 +282,7 @@ async fn handle(
 }
 
 /// Run the proxy listener forever on 127.0.0.1:<port>.
-pub async fn run_proxy(table: RouteTable, port: u16) -> std::io::Result<()> {
+pub async fn run_proxy(table: RouteTable, port: u16, metrics: Arc<Metrics>) -> std::io::Result<()> {
     let addr: SocketAddr = ([127, 0, 0, 1], port).into();
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let client: ProxyClient = Client::builder(TokioExecutor::new()).build_http();
@@ -259,8 +293,9 @@ pub async fn run_proxy(table: RouteTable, port: u16) -> std::io::Result<()> {
         let io = TokioIo::new(stream);
         let table = table.clone();
         let client = client.clone();
+        let metrics = metrics.clone();
         tokio::spawn(async move {
-            let svc = service_fn(move |req| handle(req, table.clone(), client.clone()));
+            let svc = service_fn(move |req| handle(req, table.clone(), client.clone(), metrics.clone()));
             if let Err(e) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
                 .serve_connection(io, svc)
                 .await

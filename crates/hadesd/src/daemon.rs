@@ -47,6 +47,14 @@ pub struct Daemon {
     pub secrets: crate::secrets::SecretStore,
     /// Long-lived ssh:// tunnel for `hades ssh`, spawned on first use.
     pub ssh_tunnel: tokio::sync::Mutex<Option<hades_tunnel::Tunnel>>,
+    /// Live proxy throughput counters (for the dashboard).
+    pub proxy_metrics: std::sync::Arc<hades_proxy::Metrics>,
+    /// Measured upstream bandwidth in Mbps (None until the first probe).
+    pub upload_mbps: Mutex<Option<f64>>,
+    /// Live requests/sec, sampled once a second from the proxy counters.
+    pub req_per_sec: Mutex<f64>,
+    /// Recent events pulled from fleet devices (for the dashboard's fleet log).
+    pub fleet_events: Mutex<Vec<serde_json::Value>>,
 }
 
 impl Daemon {
