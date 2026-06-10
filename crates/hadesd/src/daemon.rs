@@ -754,6 +754,44 @@ impl Daemon {
             HadesError::AppNotFound(format!("no fleet device named '{device}'"))
         })?;
 
+        // guard: the device must be on a hades that has the relay endpoint, or
+        // half this app's traffic would round-robin into a 404. The probe path
+        // can never name a real app, so a current device answers 502 (relay
+        // present, no backend) while an old one 404s (no such route).
+        let dev = self
+            .store
+            .fleet_snapshot()
+            .devices
+            .into_iter()
+            .find(|d| d.name == device)
+            .ok_or_else(|| {
+                HadesError::AppNotFound(format!("no fleet device named '{device}'"))
+            })?;
+        let probe = format!(
+            "{}/_relay/__hades_probe__/",
+            dev.control_url.trim_end_matches('/')
+        );
+        match self
+            .http
+            .get(&probe)
+            .bearer_auth(&dev.token)
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().as_u16() == 404 => {
+                return Err(HadesError::Other(format!(
+                    "{device} is on an older hades without the spread relay; update it first (on {device}: `hades update --from <your hub's site>`), then retry"
+                )));
+            }
+            Ok(_) => {} // relay present (502 expected) — good to go
+            Err(e) => {
+                return Err(HadesError::Other(format!(
+                    "couldn't reach {device} to verify it's current: {e}"
+                )));
+            }
+        }
+
         // ship the app to the device: a built app rides its retained context,
         // an image-based app is just pulled there
         let context = if rec.spec.build.is_some() {
