@@ -294,14 +294,47 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
       restarts its daemon. No registry, no release server.</p>
       <p><code>hades apps list</code> shows a DEVICE column; logs, stats,
       pause/resume and destroy are proxied through the hub to wherever the
-      app lives. Request-level balancing of one app across several devices
-      is a designed extension (the route table already supports multiple
-      backends per hostname); today the balancing is at placement time.</p>
+      app lives.</p>
       <div class="note"><b>Slow builds:</b> a deploy placed on a remote device
       builds <i>over that device's tunnel</i>, and a multi-minute image build
       can outlast the tunnel stream. For heavy builds (e.g. a full Next.js
       build), pin with <code>--device local</code> so it builds on the machine
       you're driving from.</div>
+
+      <h3>Spreading one app across machines</h3>
+      <p>Placement puts an app on one machine. <b>Spreading</b> runs it on
+      several at once and turns the hub into its load balancer. Start with an
+      app on the hub, then add a device:</p>
+      <pre><code>$ hades spread dhilan --to studio   <span class="c"># also run dhilan on studio</span>
+$ hades gather dhilan --from studio  <span class="c"># stop running it there</span>
+$ hades gather dhilan                 <span class="c"># pull it off every device</span></code></pre>
+      <p>The hub keeps the app's link and round-robins requests across every
+      instance. A request rides the hub's proxy, and for a remote instance it
+      is forwarded through that device's control tunnel to a small
+      <code>/_relay/&lt;app&gt;</code> endpoint, which hands it to the local
+      container. The hub retains each app's build context, so it can rebuild
+      the app on another machine without the original files.</p>
+      <p>This is also the failover story. Every instance is just a backend in
+      the route, so:</p>
+      <ul>
+        <li>a device going down drops out within one poll cycle, and traffic
+        keeps flowing to the survivors;</li>
+        <li>pausing an instance (by hand or under memory pressure) sheds its
+        backend immediately, so a frozen container returns a fast gateway
+        error instead of hanging the request;</li>
+        <li>under <b>critical memory pressure</b> the hub migrates the
+        lowest-priority app to a machine with room, then pauses the local copy,
+        so pressure on one machine reaches the others instead of taking the app
+        down.</li>
+      </ul>
+      <p><code>hades dashboard</code> shows every app and which machines its
+      instances run on, live.</p>
+      <div class="note"><b>One image per machine:</b> a spread instance is a
+      real container on each device, so the spread path needs each machine on
+      current hades (run <code>hades fleet update</code> first). Per-app secrets
+      do not yet travel to spread instances; set them on each machine that runs
+      the app, or keep secrets on single-placement apps for now.</div>
+
       <h3>SSH into a device</h3>
       <pre><code>$ hades ssh macbook        <span class="c"># opens an ssh:// tunnel, drops you into a shell</span></code></pre>
       <p>Hades opens the road (the device's daemon spawns an <code>ssh://</code> tunnel);
