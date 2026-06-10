@@ -161,26 +161,25 @@ impl Cloudflare {
         Ok((id, token))
     }
 
-    /// Point a tunnel's ingress at the host's local proxy for `hostname`.
+    /// Point a tunnel's ingress at the host's local proxy for one or more
+    /// hostnames (apex claims carry both the bare domain and www).
     pub async fn set_ingress(
         &self,
         tunnel_id: &str,
-        hostname: &str,
+        hostnames: &[String],
         service: &str,
     ) -> R<()> {
+        let mut ingress: Vec<Value> = hostnames
+            .iter()
+            .map(|h| json!({ "hostname": h, "service": service }))
+            .collect();
+        ingress.push(json!({ "service": "http_status:404" }));
         self.put(
             &format!(
                 "/accounts/{}/cfd_tunnel/{tunnel_id}/configurations",
                 self.account_id
             ),
-            json!({
-                "config": {
-                    "ingress": [
-                        { "hostname": hostname, "service": service },
-                        { "service": "http_status:404" }
-                    ]
-                }
-            }),
+            json!({ "config": { "ingress": ingress } }),
         )
         .await
         .map(|_| ())

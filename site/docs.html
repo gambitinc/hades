@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Docs — HADES</title>
-<meta name="description" content="HADES reference: install, login, manifest, CLI, JSON contract, events, architecture, configuration.">
+<meta name="description" content="HADES reference: install, login, manifest, secrets, fleet, custom domains, CLI, JSON contract, events, architecture, configuration.">
 <style>
   :root {
     --void:#070504; --soot:#131008; --panel:#0e0b08; --line:#2b2218;
@@ -76,9 +76,10 @@
       <a href="#login">Log in</a>
       <a href="#first-deploy">First deploy</a>
       <a href="#manifest">Hades.toml</a>
-      <a href="#cli">CLI reference</a>
       <a href="#secrets">Secrets</a>
       <a href="#fleet">Fleet</a>
+      <a href="#domains">Custom domains</a>
+      <a href="#cli">CLI reference</a>
       <a href="#json">JSON contract</a>
       <a href="#events">Events</a>
       <a href="#operations">Operating the host</a>
@@ -97,7 +98,7 @@
     <!-- ════════════════════════════ -->
     <section id="install">
       <h2><span class="n">01</span>Install</h2>
-      <pre><code>curl -fsSL https://hades.sh/install.sh | sh</code></pre>
+      <pre><code>curl -fsSL https://tryhades.com/install.sh | sh</code></pre>
       <p>The script is idempotent — run it again any time. It will:</p>
       <ul>
         <li>verify <b>Docker</b> (installs Docker Desktop via Homebrew if missing, starts the engine)</li>
@@ -107,7 +108,12 @@
         <li>run <code>hades host init</code>: write config, generate an <b>ntfy.sh notification topic</b>
             for your phone, install the daemon under <b>launchd</b> (starts at login, restarts on crash),
             and run the doctor</li>
+        <li>offer to <b>join an existing fleet</b> (paste a connect line), interactively or via
+            <code>HADES_HUB=… HADES_TOKEN=… sh</code> for unattended rollouts</li>
       </ul>
+      <p>Re-running the script is a real <b>update</b> — it refetches source and rebuilds.
+      Only deploying from this machine, not hosting on it? <code>curl -fsSL
+      https://tryhades.com/cli.sh | sh</code> installs the CLI alone.</p>
       <div class="note"><b>The doctor gates everything.</b> The daemon refuses deploys while any
       hard check fails — Docker down, disk low, no egress, port conflicts. <code>hades host doctor</code>
       prints each failure with its exact remedy.</div>
@@ -124,7 +130,7 @@ hades host init</code></pre>
       <pre><code>$ hades login
 <span class="g">⚖ you have entered the underworld</span>
 
-  host      127.0.0.1:8786 — hadesd v0.1.0
+  host      127.0.0.1:8786 — hadesd v0.2.0
   doctor    GREEN — ready for deploys
   capacity  6348MB allocatable · 0MB claimed · 0 apps</code></pre>
       <p><code>hades login</code> connects the CLI to a host, verifies the daemon is healthy
@@ -163,10 +169,11 @@ $ hades deploy
       swaps routes, and provisions a tunnel. Deploys are <b>idempotent upserts</b>: deploying
       an existing name replaces it with zero downtime (new replicas come up and pass health
       checks before old ones stop). Retries are always safe.</p>
-      <div class="note"><b>Public URLs are cattle.</b> Quick tunnels mint a fresh
-      <code>*.trycloudflare.com</code> URL whenever a tunnel restarts. <code>hades url &lt;name&gt;</code>
-      always tells the current truth, and <code>url_changed_at</code> in the JSON lets agents detect
-      staleness. Stable custom domains via named tunnels are a planned provider.</div>
+      <div class="note"><b>Quick-tunnel URLs are cattle.</b> By default apps get a fresh
+      <code>*.trycloudflare.com</code> URL that changes whenever the tunnel restarts —
+      <code>hades url &lt;name&gt;</code> always tells the current truth, and
+      <code>url_changed_at</code> (in <code>--json</code>) lets agents detect staleness. For a
+      <b>stable</b> URL that never rotates, see <a href="#domains">Custom domains</a>.</div>
     </section>
 
     <!-- ════════════════════════════ -->
@@ -279,11 +286,78 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
       app lives. Request-level balancing of one app across several devices
       is a designed extension (the route table already supports multiple
       backends per hostname); today the balancing is at placement time.</p>
+      <div class="note"><b>Slow builds:</b> a deploy placed on a remote device
+      builds <i>over that device's tunnel</i>, and a multi-minute image build
+      can outlast the tunnel stream. For heavy builds (e.g. a full Next.js
+      build), pin with <code>--device local</code> so it builds on the machine
+      you're driving from.</div>
+      <h3>SSH into a device</h3>
+      <pre><code>$ hades ssh macbook        <span class="c"># opens an ssh:// tunnel, drops you into a shell</span></code></pre>
+      <p>Hades opens the road (the device's daemon spawns an <code>ssh://</code> tunnel);
+      authentication stays plain SSH against that machine's own user accounts, so the
+      hades token alone can't get a shell. <b>Remote Login must be enabled</b> on the device
+      (System Settings → General → Sharing → Remote Login). Needs <code>cloudflared</code>
+      on both ends.</p>
+    </section>
+
+    <!-- ════════════════════════════ -->
+    <section id="domains">
+      <h2><span class="n">07</span>Custom domains</h2>
+      <p>Quick-tunnel URLs rotate. There are two ways to a <b>stable</b> URL that survives
+      restarts and reboots — pick by whether your users should need a Cloudflare account.</p>
+
+      <h3>A · claim a subdomain (no Cloudflare account)</h3>
+      <p>An operator runs one <b>coordinator</b> for a domain they own; everyone else just
+      claims a name under it. This is how you give other people stable URLs without them
+      ever touching Cloudflare.</p>
+      <pre><code>$ hades domain claim coolname --app my-app
+<span class="g">⚖ coolname.tryhades.com is yours</span>
+  https://coolname.tryhades.com        <span class="c"># stable — never rotates</span>
+
+$ hades domain claim @ --app site      <span class="c"># the apex: tryhades.com + www</span>
+$ hades domain list
+$ hades domain release --app my-app</code></pre>
+      <p>The host calls the coordinator, which creates a Cloudflare tunnel + DNS record and
+      hands back a connector token; the host runs cloudflared with it and aliases the hostname
+      to the app through its proxy. The URL is backed by a real DNS record, so it
+      <b>survives daemon restarts and reboots</b> (reconciled on boot). Hosts point at a
+      coordinator with <code>domain.coordinator_url</code> + <code>domain.coordinator_secret</code>
+      in config.</p>
+      <div class="note"><b>One level only.</b> Names are <code>&lt;name&gt;.&lt;domain&gt;</code>,
+      which Cloudflare's free wildcard certificate covers. The apex claim (<code>@</code>) also
+      serves <code>www</code>. One claim per app.</div>
+
+      <h4 style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--smoke);margin:22px 0 8px;">Running the coordinator (operator)</h4>
+      <p>The coordinator is a small service (a workspace binary; deployable as a hades app).
+      It needs a domain on Cloudflare and <b>one API token</b> with two permissions:
+      <code>Account · Cloudflare Tunnel · Edit</code> and <code>Zone · DNS · Edit</code>,
+      scoped to your zone. No per-machine <code>cloudflared tunnel login</code> — just the token.</p>
+      <pre><code><span class="c"># env (set as hades secrets when you deploy it as an app)</span>
+CF_API_TOKEN=…            <span class="c"># Tunnel:Edit + DNS:Edit</span>
+CF_ACCOUNT_ID=…
+HADES_PARENT_DOMAIN=tryhades.com
+COORDINATOR_SECRET=…      <span class="c"># hosts present this to claim</span>
+
+$ hades-coordinator       <span class="c"># serves /claim, /claims, /health on :8000</span></code></pre>
+      <p>After the domain goes active on Cloudflare, turn on <b>Always Use HTTPS</b> in the
+      zone's SSL settings so <code>http://</code> auto-upgrades (otherwise browsers flag plain
+      HTTP as "Not Secure"). Universal SSL covers the apex and one level of wildcard
+      automatically.</p>
+
+      <h3>B · bring your own domain (named tunnel)</h3>
+      <p>If you own a domain and run your own host, skip the coordinator: one named tunnel
+      carries the whole host. Run <code>cloudflared tunnel login</code> once to authorize it,
+      then:</p>
+      <pre><code>$ hades host domain apps.example.com
+  apps     https://&lt;app&gt;.apps.example.com
+  api      https://api.apps.example.com</code></pre>
+      <p>Apps live at <code>&lt;app&gt;.&lt;domain&gt;</code> and the control API at
+      <code>api.&lt;domain&gt;</code> — so even your fleet join lines stop rotating.</p>
     </section>
 
     <!-- ════════════════════════════ -->
     <section id="cli">
-      <h2><span class="n">07</span>CLI reference</h2>
+      <h2><span class="n">08</span>CLI reference</h2>
       <table>
         <tr><th>command</th><th>what it does</th></tr>
         <tr><td>hades login [--host] [--token]</td><td>connect to a host (local or remote), verify readiness, record the session</td></tr>
@@ -298,7 +372,9 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
         <tr><td>hades update [--from &lt;url&gt;]</td><td>self-update: refresh source (checkout › git › your hub › --from), rebuild, swap binaries, restart the daemon</td></tr>
         <tr><td>hades fleet update</td><td>every joined device self-updates, pulling source from this hub</td></tr>
         <tr><td>hades ssh &lt;device&gt; [--user]</td><td>shell into a fleet device — hades opens an ssh:// tunnel, auth stays plain ssh (Remote Login must be on there)</td></tr>
-        <tr><td>hades host domain &lt;domain&gt;</td><td>stable URLs on your own domain via a named tunnel: apps at https://&lt;app&gt;.&lt;domain&gt;, API at https://api.&lt;domain&gt;</td></tr>
+        <tr><td>hades domain claim &lt;name&gt; [--app]</td><td>claim a stable https://&lt;name&gt;.&lt;domain&gt; via the coordinator (<code>@</code> = apex + www); no user Cloudflare account</td></tr>
+        <tr><td>hades domain release [--app] | list</td><td>give up / list claimed domains</td></tr>
+        <tr><td>hades host domain &lt;domain&gt;</td><td>(BYO domain) put the whole host on a named tunnel: apps at &lt;app&gt;.&lt;domain&gt;, API at api.&lt;domain&gt;</td></tr>
         <tr><td>hades init</td><td>scaffold a Hades.toml in the current directory</td></tr>
         <tr><td>hades deploy [--app] [--dir] [--device]</td><td>idempotent upsert: build/pull, health-gate, swap routes, print the link</td></tr>
         <tr><td>hades apps list</td><td>all apps with state, replicas, memory, URLs</td></tr>
@@ -320,7 +396,7 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
 
     <!-- ════════════════════════════ -->
     <section id="json">
-      <h2><span class="n">08</span>JSON contract</h2>
+      <h2><span class="n">09</span>JSON contract</h2>
       <p>Every command accepts <code>--json</code> and then prints <b>exactly one JSON object</b>
       on stdout (streams print NDJSON). Progress and decoration go to stderr, so pipes stay clean:</p>
       <pre><code>hades deploy --json | jq -r .app.url</code></pre>
@@ -344,7 +420,7 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
 
     <!-- ════════════════════════════ -->
     <section id="events">
-      <h2><span class="n">09</span>Events</h2>
+      <h2><span class="n">10</span>Events</h2>
       <p>Everything observable flows through one stream — <code>hades events --follow --json</code>
       is the live wire. Each line is <code>{ "at": …, "type": …, …fields }</code>.</p>
       <table>
@@ -374,7 +450,7 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
 
     <!-- ════════════════════════════ -->
     <section id="operations">
-      <h2><span class="n">10</span>Operating the host</h2>
+      <h2><span class="n">11</span>Operating the host</h2>
       <h3>Capacity is the VM's, not the Mac's</h3>
       <p>On macOS, containers live inside the Docker VM. All admission math uses the
       <b>VM's</b> memory and CPUs; <code>hades host status</code> shows both numbers so you never
@@ -398,7 +474,7 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
 
     <!-- ════════════════════════════ -->
     <section id="architecture">
-      <h2><span class="n">11</span>Architecture</h2>
+      <h2><span class="n">12</span>Architecture</h2>
       <pre><code>crates/
 ├── hades-core      shared types: AppSpec, manifest, events, errors, config
 ├── hades-api       the CLI⇄daemon wire contract + client
@@ -406,17 +482,23 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
 ├── hades-sentinel  uptime ledger, notifiers, dead-man's switch
 ├── hades-runtime   Docker via bollard: build-from-tar, limits, OOM detection
 ├── hades-proxy     Host-header reverse proxy: aliases, replicas, shed caps
-├── hades-tunnel    cloudflared quick tunnels: provision, scrape URL, supervise
+├── hades-tunnel    cloudflared: quick tunnels, named tunnels, ssh tunnels
 ├── hadesd          the daemon: API, reconcile, watchdog, policy engine
-└── hades-cli       the `hades` binary</code></pre>
+├── hades-cli       the `hades` binary
+└── hades-coordinator  operator subdomain service (Cloudflare-backed claims)</code></pre>
       <ul>
         <li><b>Event bus as spine.</b> Reconcile loop, watchdog, power monitor and tunnel
         supervisor publish events; notifications, the policy engine, the JSONL ledger and
         <code>/events</code> consume them. The policy engine is a pure function
         (event, app states) → actions — unit-tested without Docker.</li>
-        <li><b>Tunnel topology.</b> A quick tunnel maps one hostname to one port, so each app
-        gets its own cloudflared pointed <i>at the proxy</i>, and the scraped hostname is
-        registered as an alias route. The proxy stays the single ingress.</li>
+        <li><b>Tunnel topology.</b> By default each app gets its own cloudflared quick tunnel
+        pointed <i>at the proxy</i>, and the scraped hostname is registered as an alias route.
+        Stable URLs use the same alias mechanism over a coordinator-issued or named tunnel.
+        The proxy stays the single ingress, routing every hostname by Host header.</li>
+        <li><b>Fleet.</b> A hub holds device control URLs + tokens, polls health, places
+        deploys by free memory, and proxies app commands to wherever an app lives. Devices
+        re-register with their hub whenever their tunnel URL rotates (self-heal). Hosts serve
+        their own source, so updates propagate hub→device with no registry.</li>
         <li><b>Reconcile.</b> Desired state is a JSON file; on restart the daemon converges
         reality to it — containers, routes, tunnels — and reports the downtime honestly.</li>
       </ul>
@@ -424,7 +506,7 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
 
     <!-- ════════════════════════════ -->
     <section id="config">
-      <h2><span class="n">12</span>Configuration</h2>
+      <h2><span class="n">13</span>Configuration</h2>
       <p><code>~/.hades/config.toml</code>, written by <code>hades host init</code>:</p>
       <table>
         <tr><th>key</th><th>default</th><th>meaning</th></tr>
@@ -440,7 +522,8 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
         <tr><td>notify.healthchecks_url</td><td>—</td><td>dead-man's switch ping URL</td></tr>
         <tr><td>fleet.hub_url / fleet.hub_token</td><td>—</td><td>written by <code>hades host join</code>: which hub owns this device</td></tr>
         <tr><td>keep_awake</td><td>true</td><td>hold a caffeinate power assertion so the host never idle-sleeps while hosting</td></tr>
-        <tr><td>domain.name / domain.tunnel_name</td><td>—</td><td>set by <code>hades host domain</code>: stable URLs via a named Cloudflare tunnel</td></tr>
+        <tr><td>domain.name / domain.tunnel_name</td><td>—</td><td>set by <code>hades host domain</code>: BYO-domain named tunnel</td></tr>
+        <tr><td>domain.coordinator_url / .coordinator_secret</td><td>—</td><td>which coordinator <code>hades domain claim</code> uses, and the shared secret</td></tr>
         <tr><td>source_dir</td><td>set by installer</td><td>where this host's source lives — rebuilt by <code>hades update</code>, served to devices at /host/src</td></tr>
       </table>
       <p>State lives under <code>~/.hades/</code>: desired state and the process registry in

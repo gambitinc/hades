@@ -36,7 +36,7 @@ struct Claim {
     name: String,
     hostname: String,
     tunnel_id: String,
-    dns_id: String,
+    dns_ids: Vec<String>,
     claimed_at: DateTime<Utc>,
 }
 
@@ -70,6 +70,9 @@ fn err(status: StatusCode, msg: impl Into<String>) -> Response {
 }
 
 fn valid_name(n: &str) -> bool {
+    if n == "@" {
+        return true; // the apex (root domain + www)
+    }
     !n.is_empty()
         && n.len() <= 40
         && n.chars()
@@ -110,10 +113,15 @@ async fn claim(
     if !valid_name(&name) {
         return err(
             StatusCode::BAD_REQUEST,
-            "name must be lowercase [a-z0-9-], 1–40 chars, not 'api'/'www'",
+            "name must be '@' (apex) or lowercase [a-z0-9-], 1–40 chars, not 'api'/'www'",
         );
     }
-    let hostname = format!("{name}.{}", s.domain);
+    let apex = name == "@";
+    let hostname = if apex {
+        s.domain.clone()
+    } else {
+        format!("{name}.{}", s.domain)
+    };
 
     {
         let claims = s.claims.lock().await;
@@ -121,11 +129,22 @@ async fn claim(
             return err(StatusCode::CONFLICT, format!("{hostname} is already taken"));
         }
     }
-    // also guard against a record that exists in DNS but not our state
-    match s.cf.find_dns(&hostname).await {
-        Ok(Some(_)) => return err(StatusCode::CONFLICT, format!("{hostname} already exists in DNS")),
-        Ok(None) => {}
-        Err(e) => return err(StatusCode::BAD_GATEWAY, format!("cloudflare: {e}")),
+    // hostnames this claim serves; apex also carries www
+    let (hostnames, dns_subs): (Vec<String>, Vec<String>) = if apex {
+        (
+            vec![s.domain.clone(), format!("www.{}", s.domain)],
+            vec!["@".to_string(), "www".to_string()],
+        )
+    } else {
+        (vec![hostname.clone()], vec![name.clone()])
+    };
+    // guard against records that exist in DNS but not our state
+    for h in &hostnames {
+        match s.cf.find_dns(h).await {
+            Ok(Some(_)) => return err(StatusCode::CONFLICT, format!("{h} already exists in DNS")),
+            Ok(None) => {}
+            Err(e) => return err(StatusCode::BAD_GATEWAY, format!("cloudflare: {e}")),
+        }
     }
 
     let proxy = req
@@ -133,23 +152,30 @@ async fn claim(
         .unwrap_or_else(|| "http://localhost:8787".to_string());
 
     // 1 · tunnel
-    let (tunnel_id, connector_token) = match s.cf.create_tunnel(&format!("hades-{name}")).await {
+    let tname = if apex { "hades-apex".to_string() } else { format!("hades-{name}") };
+    let (tunnel_id, connector_token) = match s.cf.create_tunnel(&tname).await {
         Ok(t) => t,
         Err(e) => return err(StatusCode::BAD_GATEWAY, format!("create tunnel: {e}")),
     };
     // 2 · ingress → the host's proxy (it routes by Host header)
-    if let Err(e) = s.cf.set_ingress(&tunnel_id, &hostname, &proxy).await {
+    if let Err(e) = s.cf.set_ingress(&tunnel_id, &hostnames, &proxy).await {
         let _ = s.cf.delete_tunnel(&tunnel_id).await;
         return err(StatusCode::BAD_GATEWAY, format!("set ingress: {e}"));
     }
-    // 3 · dns
-    let dns_id = match s.cf.create_dns(&name, &tunnel_id).await {
-        Ok(id) => id,
-        Err(e) => {
-            let _ = s.cf.delete_tunnel(&tunnel_id).await;
-            return err(StatusCode::BAD_GATEWAY, format!("create dns: {e}"));
+    // 3 · dns (one or two records)
+    let mut dns_ids = Vec::new();
+    for sub in &dns_subs {
+        match s.cf.create_dns(sub, &tunnel_id).await {
+            Ok(id) => dns_ids.push(id),
+            Err(e) => {
+                for id in &dns_ids {
+                    let _ = s.cf.delete_dns(id).await;
+                }
+                let _ = s.cf.delete_tunnel(&tunnel_id).await;
+                return err(StatusCode::BAD_GATEWAY, format!("create dns: {e}"));
+            }
         }
-    };
+    }
 
     s.claims.lock().await.insert(
         name.clone(),
@@ -157,7 +183,7 @@ async fn claim(
             name: name.clone(),
             hostname: hostname.clone(),
             tunnel_id: tunnel_id.clone(),
-            dns_id,
+            dns_ids,
             claimed_at: Utc::now(),
         },
     );
@@ -184,7 +210,9 @@ async fn release(
     let Some(claim) = claim else {
         return err(StatusCode::NOT_FOUND, "no such claim");
     };
-    let _ = s.cf.delete_dns(&claim.dns_id).await;
+    for id in &claim.dns_ids {
+        let _ = s.cf.delete_dns(id).await;
+    }
     let _ = s.cf.delete_tunnel(&claim.tunnel_id).await;
     save(&s).await;
     Json(serde_json::json!({ "released": claim.hostname })).into_response()

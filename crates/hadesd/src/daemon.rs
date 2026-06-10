@@ -451,6 +451,10 @@ impl Daemon {
             hostnames.push(format!("{}.{}", rec.spec.name, dom));
         }
         if let Some(claim) = self.store.claim_for(&rec.spec.name) {
+            if claim.name == "@" {
+                // apex: serve both the bare domain and www
+                hostnames.push(format!("www.{}", claim.hostname));
+            }
             hostnames.push(claim.hostname);
         }
         if let Some(url) = &rec.tunnel_url {
