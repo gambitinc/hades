@@ -160,6 +160,31 @@ impl DaemonClient {
         .await
     }
 
+    /// Run another instance of a hub-hosted app on a fleet device.
+    pub async fn app_spread(&self, app: &str, device: &str) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/apps/{app}/spread", self.base)))
+                .json(&serde_json::json!({ "device": device }))
+                .timeout(std::time::Duration::from_secs(600))
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    /// Stop running an app on a spread device (`all` = every device).
+    pub async fn app_gather(&self, app: &str, device: &str) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(
+                self.http
+                    .delete(format!("{}/apps/{app}/spread/{device}", self.base)),
+            )
+            .send()
+            .await,
+        )
+        .await
+    }
+
     pub async fn list_apps(&self) -> Result<Vec<AppInfo>, ApiError> {
         Self::check(self.auth(self.http.get(format!("{}/apps", self.base))).send().await).await
     }

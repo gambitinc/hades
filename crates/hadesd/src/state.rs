@@ -71,8 +71,14 @@ pub struct ClaimRecord {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FleetFile {
     pub devices: Vec<crate::fleet::FleetDeviceRecord>,
-    /// app name -> device name (apps absent here run on the hub itself)
+    /// app name -> device name. A single-device pin: the app runs entirely on
+    /// that device (the hub holds no container for it).
     pub placements: HashMap<String, String>,
+    /// app name -> extra devices an otherwise hub-hosted app is also running
+    /// on. The hub keeps the route and load-balances across itself plus these,
+    /// so one machine dropping out just removes a backend.
+    #[serde(default)]
+    pub spreads: HashMap<String, Vec<String>>,
 }
 
 pub struct Store {

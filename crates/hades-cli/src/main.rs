@@ -91,6 +91,24 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<FleetCmd>,
     },
+    /// Run another instance of a hub-hosted app on a fleet device. The hub
+    /// keeps the link and load-balances across every instance, so the app
+    /// survives one machine going down or hitting memory.
+    Spread {
+        /// App to spread (default: the Hades.toml here).
+        app: Option<String>,
+        /// Device to also run it on (as shown by `hades fleet`).
+        #[arg(long)]
+        to: String,
+    },
+    /// Stop running an app on a spread device and re-home its traffic.
+    Gather {
+        /// App to gather (default: the Hades.toml here).
+        app: Option<String>,
+        /// Device to pull it off; omit to gather from every device.
+        #[arg(long)]
+        from: Option<String>,
+    },
     /// Print an app's current public URL (URLs change when tunnels restart).
     Url { name: String },
     /// The host's event stream (NDJSON with --json): deploys, OOM kills,
@@ -364,6 +382,8 @@ async fn main() -> ExitCode {
         Cmd::Apps { cmd } => apps_cmd(cmd, json).await,
         Cmd::Secrets { cmd } => secrets_cmd(cmd, json).await,
         Cmd::Fleet { cmd } => fleet_cmd(cmd.unwrap_or(FleetCmd::List), json).await,
+        Cmd::Spread { app, to } => spread_cmd(app, to, json).await,
+        Cmd::Gather { app, from } => gather_cmd(app, from, json).await,
         Cmd::Url { name } => match client().get_app(&name).await {
             Ok(info) => {
                 if json {
@@ -1203,6 +1223,48 @@ async fn fleet_cmd(cmd: FleetCmd, json: bool) -> ExitCode {
             }
             Err(e) => fail(e, json),
         },
+    }
+}
+
+async fn spread_cmd(app: Option<String>, to: String, json: bool) -> ExitCode {
+    let app = match app_or_manifest(app) {
+        Ok(a) => a,
+        Err(e) => return fail(e, json),
+    };
+    eprintln!("spreading {app} to {to}…");
+    match client().app_spread(&app, &to).await {
+        Ok(v) => {
+            if json {
+                render::json(&v);
+            } else {
+                println!();
+                println!("  ⚖ {app} now runs on this hub and {to}");
+                println!("    the link load-balances across both; lose one and traffic stays up.");
+                println!("    see it live: hades dashboard");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(e, json),
+    }
+}
+
+async fn gather_cmd(app: Option<String>, from: Option<String>, json: bool) -> ExitCode {
+    let app = match app_or_manifest(app) {
+        Ok(a) => a,
+        Err(e) => return fail(e, json),
+    };
+    let target = from.clone().unwrap_or_else(|| "all".into());
+    match client().app_gather(&app, &target).await {
+        Ok(v) => {
+            if json {
+                render::json(&v);
+            } else {
+                let where_ = from.unwrap_or_else(|| "every device".into());
+                println!("gathered {app} from {where_}; traffic re-homed to the remaining instances");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(e, json),
     }
 }
 

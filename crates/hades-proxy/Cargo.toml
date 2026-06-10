@@ -10,4 +10,5 @@ tokio = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 http-body-util = { workspace = true }
+reqwest = { workspace = true }
 tracing = { workspace = true }

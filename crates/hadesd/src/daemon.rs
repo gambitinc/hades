@@ -214,6 +214,15 @@ impl Daemon {
         }
         self.admit(&spec).await.map_err(|(e, l)| (e, Some(l)))?;
 
+        // retain the build context so this app can be rebuilt on another
+        // machine later (spread, or migration off a pressured host) without
+        // the original source files
+        if let Some(ctx) = &context_tar_gz {
+            if let Err(e) = std::fs::write(self.paths.context_file(&spec.name), ctx) {
+                tracing::warn!(app = %spec.name, "could not retain build context: {e}");
+            }
+        }
+
         // image: build from uploaded context or pull
         let image = if let Some(build) = &spec.build {
             let tar = context_tar_gz.ok_or_else(|| {
@@ -452,13 +461,17 @@ impl Daemon {
     }
 
     /// (Re)install the proxy routes for an app: local hostname plus the
-    /// tunnel alias when one is live.
+    /// tunnel alias when one is live. Backends aggregate this machine's
+    /// running replicas with any instances the app is spread to on other
+    /// fleet machines, so the route is the load balancer. A paused or
+    /// unhealthy instance simply contributes no backend.
     pub fn install_routes(&self, rec: &AppRecord) {
+        let app = &rec.spec.name;
         let mut hostnames = vec![rec.spec.local_hostname()];
         if let Some(dom) = &self.config.domain.name {
-            hostnames.push(format!("{}.{}", rec.spec.name, dom));
+            hostnames.push(format!("{}.{}", app, dom));
         }
-        if let Some(claim) = self.store.claim_for(&rec.spec.name) {
+        if let Some(claim) = self.store.claim_for(app) {
             if claim.name == "@" {
                 // apex: serve both the bare domain and www
                 hostnames.push(format!("www.{}", claim.hostname));
@@ -470,21 +483,59 @@ impl Daemon {
                 hostnames.push(host.to_string());
             }
         }
-        let backends = rec
-            .replicas
-            .iter()
-            .map(|r| {
-                format!("127.0.0.1:{}", r.host_port)
+
+        let mut backends: Vec<hades_proxy::Backend> = Vec::new();
+        // local replicas serve only while the app is actually running here;
+        // pausing it drops its backends so traffic shifts to other instances
+        if rec.state == AppState::Running {
+            for r in &rec.replicas {
+                let addr = format!("127.0.0.1:{}", r.host_port)
                     .parse()
-                    .expect("loopback addr parses")
-            })
-            .collect();
-        self.table.set_app(
-            &rec.spec.name,
-            hostnames,
-            backends,
-            rec.spec.max_concurrent_requests,
-        );
+                    .expect("loopback addr parses");
+                backends.push(hades_proxy::Backend::Local(addr));
+            }
+        }
+        backends.extend(self.spread_backends(app));
+
+        self.table
+            .set_app(app, hostnames, backends, rec.spec.max_concurrent_requests);
+    }
+
+    /// Relay backends for an app's spread instances on other fleet machines,
+    /// skipping any device the poller currently sees as unhealthy.
+    pub fn spread_backends(&self, app: &str) -> Vec<hades_proxy::Backend> {
+        let fleet = self.store.fleet_snapshot();
+        let Some(devices) = fleet.spreads.get(app) else {
+            return Vec::new();
+        };
+        let statuses = self.fleet_status.lock().unwrap();
+        let mut out = Vec::new();
+        for name in devices {
+            let Some(dev) = fleet.devices.iter().find(|d| &d.name == name) else {
+                continue;
+            };
+            let healthy = statuses.get(name).map(|s| s.healthy).unwrap_or(false);
+            if healthy {
+                out.push(hades_proxy::Backend::Remote {
+                    relay: format!(
+                        "{}/_relay/{}",
+                        dev.control_url.trim_end_matches('/'),
+                        app
+                    ),
+                    token: dev.token.clone(),
+                });
+            }
+        }
+        out
+    }
+
+    /// Re-install routes for every hub-hosted app. Called when fleet health
+    /// changes so a device going down (or coming back) updates the backend
+    /// sets that route through this hub.
+    pub fn refresh_all_routes(&self) {
+        for rec in self.store.snapshot().values() {
+            self.install_routes(rec);
+        }
     }
 
     // ----- tunnels -----
@@ -584,6 +635,23 @@ impl Daemon {
             .ok_or_else(|| HadesError::AppNotFound(name.into()))?;
         self.stop_tunnel_task(name);
         self.table.remove_app(name);
+        // tear down any instances spread to other machines, too
+        let spreads = self
+            .store
+            .fleet_snapshot()
+            .spreads
+            .get(name)
+            .cloned()
+            .unwrap_or_default();
+        for dev in spreads {
+            if let Some(client) = self.device_client(&dev) {
+                let _ = client.destroy(name).await;
+            }
+        }
+        self.store.update_fleet(|f| {
+            f.spreads.remove(name);
+        });
+        let _ = std::fs::remove_file(self.paths.context_file(name));
         for r in &rec.replicas {
             let _ = self.runtime.stop_remove(&r.container_id).await;
         }
@@ -628,6 +696,10 @@ impl Daemon {
                 })
             })
             .ok_or_else(|| HadesError::AppNotFound(name.into()))?;
+        // drop this machine's backends from the route; if the app is spread,
+        // traffic now flows to the surviving instances instead of hanging on
+        // a frozen container
+        self.install_routes(&rec);
         self.emit(HostEvent::AppPaused {
             app: name.into(),
             reason,
@@ -656,8 +728,148 @@ impl Daemon {
                 })
             })
             .ok_or_else(|| HadesError::AppNotFound(name.into()))?;
+        // local replicas are serving again: put their backends back in
+        self.install_routes(&rec);
         self.emit(HostEvent::AppResumed { app: name.into() });
         Ok(self.app_info(&rec))
+    }
+
+    // ----- spread (multi-machine instances of one hub-hosted app) -----
+
+    /// Run another instance of a hub-hosted app on a fleet device. The hub
+    /// keeps the route and load-balances across itself plus every spread
+    /// instance, so this is also the failover story: lose a machine and its
+    /// backend just drops out.
+    pub async fn spread(self: &std::sync::Arc<Self>, app: &str, device: &str) -> Result<(), HadesError> {
+        let rec = self
+            .store
+            .get(app)
+            .ok_or_else(|| HadesError::AppNotFound(app.into()))?;
+        if self.placement_of(app).is_some() {
+            return Err(HadesError::Other(format!(
+                "{app} is pinned to a device; spread runs on hub-hosted apps"
+            )));
+        }
+        let client = self.device_client(device).ok_or_else(|| {
+            HadesError::AppNotFound(format!("no fleet device named '{device}'"))
+        })?;
+
+        // ship the app to the device: a built app rides its retained context,
+        // an image-based app is just pulled there
+        let context = if rec.spec.build.is_some() {
+            match std::fs::read(self.paths.context_file(app)) {
+                Ok(b) => Some(b),
+                Err(_) => {
+                    return Err(HadesError::Other(format!(
+                        "no retained build context for {app}; redeploy it once so the hub can spread it"
+                    )))
+                }
+            }
+        } else {
+            None
+        };
+        client
+            .deploy(&rec.spec, context, Some("local"))
+            .await
+            .map_err(|e| e.error)?;
+
+        self.store.update_fleet(|f| {
+            let list = f.spreads.entry(app.to_string()).or_default();
+            if !list.iter().any(|d| d == device) {
+                list.push(device.to_string());
+            }
+        });
+        crate::fleet::poll_one(self, device).await;
+        if let Some(rec) = self.store.get(app) {
+            self.install_routes(&rec);
+        }
+        self.emit(HostEvent::AppDeployed {
+            app: format!("{app} +{device}"),
+            replaced: false,
+        });
+        Ok(())
+    }
+
+    /// Stop running an app on one (or every) spread device and re-home traffic.
+    pub async fn gather(
+        self: &std::sync::Arc<Self>,
+        app: &str,
+        device: Option<&str>,
+    ) -> Result<Vec<String>, HadesError> {
+        let targets: Vec<String> = {
+            let f = self.store.fleet_snapshot();
+            let cur = f.spreads.get(app).cloned().unwrap_or_default();
+            match device {
+                Some(d) => cur.into_iter().filter(|x| x == d).collect(),
+                None => cur,
+            }
+        };
+        if targets.is_empty() {
+            return Err(HadesError::Other(format!(
+                "{app} is not spread to {}",
+                device.unwrap_or("any device")
+            )));
+        }
+        for dev in &targets {
+            if let Some(client) = self.device_client(dev) {
+                let _ = client.destroy(app).await;
+            }
+        }
+        self.store.update_fleet(|f| {
+            if let Some(list) = f.spreads.get_mut(app) {
+                list.retain(|d| !targets.contains(d));
+                if list.is_empty() {
+                    f.spreads.remove(app);
+                }
+            }
+        });
+        if let Some(rec) = self.store.get(app) {
+            self.install_routes(&rec);
+        }
+        Ok(targets)
+    }
+
+    /// Under sustained memory pressure, move one app off this machine: spread
+    /// the lowest-priority hub-hosted app to the freest healthy device, then
+    /// pause the local copy so its memory frees and traffic flows to the
+    /// device. This is the fleet earning its keep: pressure on one machine
+    /// reaches the others instead of just taking the app down.
+    pub async fn try_pressure_migration(self: &std::sync::Arc<Self>) {
+        let fleet = self.store.fleet_snapshot();
+        if fleet.devices.is_empty() {
+            return;
+        }
+        let mut candidates: Vec<AppRecord> = self
+            .store
+            .snapshot()
+            .into_values()
+            .filter(|r| r.state == AppState::Running)
+            .filter(|r| r.spec.priority != hades_core::Priority::Critical)
+            .filter(|r| self.placement_of(&r.spec.name).is_none())
+            .filter(|r| !fleet.spreads.contains_key(&r.spec.name))
+            .collect();
+        candidates.sort_by_key(|r| r.spec.priority);
+        let Some(rec) = candidates.first() else {
+            return;
+        };
+        let app = rec.spec.name.clone();
+        let needed = rec.spec.resources.memory_mb * rec.spec.replicas as u64;
+        let Some(device) = self.choose_device(needed).await else {
+            tracing::info!(app = %app, "pressure migration: no fleet device with room");
+            return;
+        };
+        tracing::info!(app = %app, device = %device, "pressure: migrating app to fleet device");
+        if let Err(e) = self.spread(&app, &device).await {
+            tracing::warn!(app = %app, "pressure migration failed: {e}");
+            return;
+        }
+        // free this machine: pause the local instance. The route already holds
+        // the device backend, so the app stays reachable.
+        let _ = self.pause_app(&app, PauseReason::MemoryPressure).await;
+        self.emit(HostEvent::AppDeployed {
+            app: format!("{app} migrated to {device} under memory pressure"),
+            replaced: false,
+        });
     }
 
     // ----- views -----

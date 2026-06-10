@@ -111,7 +111,15 @@ impl Daemon {
 pub async fn poll(d: Arc<Daemon>) {
     loop {
         let fleet = d.store.fleet_snapshot();
+        let mut health_changed = false;
         for dev in &fleet.devices {
+            let was_healthy = d
+                .fleet_status
+                .lock()
+                .unwrap()
+                .get(&dev.name)
+                .map(|s| s.healthy)
+                .unwrap_or(false);
             let client = DaemonClient::for_host(&dev.control_url, Some(dev.token.clone()));
             let status = match client.host_status().await {
                 Ok(s) => DeviceStatus {
@@ -135,12 +143,20 @@ pub async fn poll(d: Arc<Daemon>) {
                     prev
                 }
             };
+            if status.healthy != was_healthy {
+                health_changed = true;
+            }
             d.fleet_status
                 .lock()
                 .unwrap()
                 .insert(dev.name.clone(), status);
         }
-        tokio::time::sleep(Duration::from_secs(30)).await;
+        // a device flipping health changes which spread backends are live, so
+        // re-home routes through this hub right away
+        if health_changed {
+            d.refresh_all_routes();
+        }
+        tokio::time::sleep(Duration::from_secs(10)).await;
     }
 }
 

@@ -8,7 +8,7 @@ use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
 use hades_api::types::*;
@@ -109,6 +109,9 @@ pub fn router(d: D) -> Router {
         .route("/fleet/devices", post(fleet_join))
         .route("/fleet/devices/{name}", delete(fleet_remove))
         .route("/fleet/update", post(fleet_update))
+        .route("/apps/{name}/spread", post(app_spread))
+        .route("/apps/{name}/spread/{device}", delete(app_gather))
+        .route("/_relay/{*path}", any(relay))
         .route("/events", get(events))
         .route("/notify/test", post(notify_test))
         .route_layer(axum::middleware::from_fn_with_state(d.clone(), require_auth));
@@ -560,6 +563,63 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
         }));
     }
 
+    // apps and where each one's instances live (this machine + spreads)
+    let fleet_file = d.store.fleet_snapshot();
+    let statuses = d.fleet_status.lock().unwrap().clone();
+    let self_name = short_hostname();
+    let mut app_rows: Vec<serde_json::Value> = Vec::new();
+    for (name, rec) in d.store.snapshot() {
+        let mut instances = vec![serde_json::json!({
+            "machine": self_name,
+            "role": "hub",
+            "is_self": true,
+            "state": rec.state.to_string(),
+            "replicas": rec.replicas.len(),
+            "healthy": self_healthy && rec.state == AppState::Running,
+        })];
+        if let Some(devs) = fleet_file.spreads.get(&name) {
+            for dev in devs {
+                let healthy = statuses.get(dev).map(|s| s.healthy).unwrap_or(false);
+                instances.push(serde_json::json!({
+                    "machine": dev,
+                    "role": "device",
+                    "is_self": false,
+                    "state": if healthy { "running" } else { "unreachable" },
+                    "replicas": rec.spec.replicas,
+                    "healthy": healthy,
+                }));
+            }
+        }
+        let st = d.table.stats(&name);
+        app_rows.push(serde_json::json!({
+            "name": name,
+            "hostname": d.store.claim_for(&name).map(|c| c.hostname),
+            "spread": fleet_file.spreads.get(&name).map(|v| !v.is_empty()).unwrap_or(false),
+            "requests": st.as_ref().map(|s| s.requests_total).unwrap_or(0),
+            "p95_ms": st.as_ref().map(|s| s.p95_ms).unwrap_or(0.0),
+            "instances": instances,
+        }));
+    }
+    for (name, dev) in &fleet_file.placements {
+        let healthy = statuses.get(dev).map(|s| s.healthy).unwrap_or(false);
+        app_rows.push(serde_json::json!({
+            "name": name,
+            "hostname": null,
+            "spread": false,
+            "requests": 0,
+            "p95_ms": 0.0,
+            "instances": [serde_json::json!({
+                "machine": dev,
+                "role": "device",
+                "is_self": false,
+                "state": if healthy { "running" } else { "unreachable" },
+                "replicas": 1,
+                "healthy": healthy,
+            })],
+        }));
+    }
+    app_rows.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+
     let body = serde_json::json!({
         "machine": {
             "name": short_hostname(),
@@ -589,6 +649,7 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
             "healthy": healthy_count,
             "devices": devices,
         },
+        "apps": app_rows,
         "machine_events": local_events(&d, 40),
         "fleet_events": *d.fleet_events.lock().unwrap(),
     });
@@ -691,6 +752,108 @@ async fn fleet_remove(State(d): State<D>, Path(name): Path<String>) -> Response 
         Json(d.fleet_view()).into_response()
     } else {
         err_response(&HadesError::AppNotFound(format!("device {name}")), None)
+    }
+}
+
+#[derive(Deserialize)]
+struct SpreadBody {
+    device: String,
+}
+
+/// Run another instance of a hub-hosted app on a fleet device.
+async fn app_spread(
+    State(d): State<D>,
+    Path(name): Path<String>,
+    Json(b): Json<SpreadBody>,
+) -> Response {
+    match d.spread(&name, &b.device).await {
+        Ok(()) => Json(serde_json::json!({ "app": name, "spread_to": b.device })).into_response(),
+        Err(e) => err_response(&e, None),
+    }
+}
+
+/// Stop running an app on one spread device (`all` clears every spread).
+async fn app_gather(State(d): State<D>, Path((name, device)): Path<(String, String)>) -> Response {
+    let dev = if device == "all" { None } else { Some(device.as_str()) };
+    match d.gather(&name, dev).await {
+        Ok(removed) => Json(serde_json::json!({ "app": name, "gathered": removed })).into_response(),
+        Err(e) => err_response(&e, None),
+    }
+}
+
+/// One catch-all for `/_relay/<app>[/...]`. A wildcard (rather than `{app}`
+/// plus `{app}/{*rest}`) is the only form that matches the bare and
+/// trailing-slash cases too, which is exactly what a visitor hitting `/`
+/// produces on the hub side.
+async fn relay(
+    State(d): State<D>,
+    Path(path): Path<String>,
+    req: axum::extract::Request,
+) -> Response {
+    let app = path.split('/').next().unwrap_or("").to_string();
+    relay_inner(d, app, req).await
+}
+
+fn relay_gateway_error() -> Response {
+    Response::builder()
+        .status(StatusCode::BAD_GATEWAY)
+        .body(Body::empty())
+        .unwrap()
+}
+
+/// Forward a relayed request from the hub to this machine's local instance of
+/// the app. Auth'd (the hub presents this device's token); a 502 here tells
+/// the hub to try another backend.
+async fn relay_inner(d: D, app: String, req: axum::extract::Request) -> Response {
+    let Some(addr) = d.table.local_backend(&app) else {
+        return relay_gateway_error();
+    };
+    let prefix = format!("/_relay/{app}");
+    let pq = req
+        .uri()
+        .path_and_query()
+        .map(|p| p.as_str())
+        .unwrap_or("/")
+        .to_string();
+    let rest = pq.strip_prefix(&prefix).unwrap_or("");
+    let rest = if rest.is_empty() { "/" } else { rest };
+    let url = format!("http://{addr}{rest}");
+
+    let (parts, body) = req.into_parts();
+    let Ok(body_bytes) = axum::body::to_bytes(body, 256 * 1024 * 1024).await else {
+        return relay_gateway_error();
+    };
+    let Ok(method) = reqwest::Method::from_bytes(parts.method.as_str().as_bytes()) else {
+        return relay_gateway_error();
+    };
+    let mut rb = d.http.request(method, url).body(body_bytes);
+    for (name, value) in parts.headers.iter() {
+        let n = name.as_str().to_ascii_lowercase();
+        if matches!(
+            n.as_str(),
+            "host" | "authorization" | "content-length" | "connection" | "transfer-encoding"
+        ) {
+            continue;
+        }
+        rb = rb.header(name.as_str(), value.as_bytes());
+    }
+    match rb.send().await {
+        Ok(resp) => {
+            let mut builder = Response::builder().status(resp.status().as_u16());
+            for (name, value) in resp.headers().iter() {
+                let n = name.as_str().to_ascii_lowercase();
+                if matches!(n.as_str(), "transfer-encoding" | "connection" | "content-length") {
+                    continue;
+                }
+                builder = builder.header(name.as_str(), value.as_bytes());
+            }
+            let bytes = resp.bytes().await.unwrap_or_default();
+            builder.body(Body::from(bytes)).unwrap_or_else(|_| relay_gateway_error())
+        }
+        Err(e) => {
+            tracing::warn!(app = %app, "relay upstream error: {e}");
+            relay_gateway_error()
+        }
     }
 }
 

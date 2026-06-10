@@ -36,6 +36,14 @@ impl HadesPaths {
     pub fn claims_state(&self) -> PathBuf {
         self.state_dir().join("claims.json")
     }
+    /// Retained build contexts, so the hub can rebuild an app on another
+    /// machine (spread / pressure migration) without the original files.
+    pub fn contexts_dir(&self) -> PathBuf {
+        self.state_dir().join("contexts")
+    }
+    pub fn context_file(&self, app: &str) -> PathBuf {
+        self.contexts_dir().join(format!("{app}.tar.gz"))
+    }
     pub fn ledger_dir(&self) -> PathBuf {
         self.root.join("ledger")
     }
@@ -68,6 +76,7 @@ impl HadesPaths {
             self.ledger_dir(),
             self.metrics_dir(),
             self.logs_dir(),
+            self.contexts_dir(),
         ] {
             std::fs::create_dir_all(d)?;
         }

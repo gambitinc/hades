@@ -201,6 +201,11 @@ async fn sample_and_pressure(d: &Arc<Daemon>) {
             level,
             available_mb,
         });
+        // critical pressure with a fleet to fall back on: move an app to a
+        // machine that has room instead of only pausing it here
+        if level == PressureLevel::Critical {
+            d.try_pressure_migration().await;
+        }
     }
 
     // Continuously (not just on a transition) resume anything we paused for
