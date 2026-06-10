@@ -696,13 +696,18 @@ async fn host_cmd(cmd: HostCmd, json: bool) -> ExitCode {
                             if json {
                                 render::json(&serde_json::json!({
                                     "host": url, "token": token,
-                                    "command": format!("hades login --host {url} --token {token}"),
+                                    // join = add that machine to this fleet; login = drive this host from there
+                                    "join_command": format!("hades host join --hub {url} --token {token}"),
+                                    "login_command": format!("hades login --host {url} --token {token}"),
                                 }));
                             } else {
                                 println!();
-                                println!("  on the other machine, run:");
+                                println!("  to add another machine to this fleet, run THERE:");
                                 println!();
-                                println!("    hades login --host {url} --token {token}");
+                                println!("    hades host join --hub {url} --token {token}");
+                                println!();
+                                println!("  (or, to drive this host from another machine instead of");
+                                println!("   joining it: hades login --host {url} --token {token})");
                                 println!();
                                 println!("  the URL changes when the host restarts; the token does not.");
                                 println!("  treat this line like a password.");
