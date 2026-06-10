@@ -331,25 +331,36 @@ $ hades domain release --app my-app</code></pre>
       <p>The host calls the coordinator, which creates a Cloudflare tunnel + DNS record and
       hands back a connector token; the host runs cloudflared with it and aliases the hostname
       to the app through its proxy. The URL is backed by a real DNS record, so it
-      <b>survives daemon restarts and reboots</b> (reconciled on boot). Hosts point at a
-      coordinator with <code>domain.coordinator_url</code> + <code>domain.coordinator_secret</code>
-      in config.</p>
+      <b>survives daemon restarts and reboots</b> (reconciled on boot). The hub stores its
+      <code>domain.coordinator_url</code> + <code>domain.coordinator_secret</code> in config.</p>
+      <div class="note"><b>Works fleet-wide.</b> When an app runs on a fleet device, the claim
+      is forwarded to that device and the hub hands the device its coordinator URL and secret
+      in the same call, so a device never needs <code>coordinator_url</code> in its own config.
+      The device runs the claim's tunnel pointed at its own proxy, so the stable name resolves
+      to wherever the app actually lives.</div>
       <div class="note"><b>One level only.</b> Names are <code>&lt;name&gt;.&lt;domain&gt;</code>,
       which Cloudflare's free wildcard certificate covers. The apex claim (<code>@</code>) also
       serves <code>www</code>. One claim per app.</div>
 
       <h4 style="font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--smoke);margin:22px 0 8px;">Running the coordinator (operator)</h4>
-      <p>The coordinator is a small service (a workspace binary; deployable as a hades app).
-      It needs a domain on Cloudflare and <b>one API token</b> with two permissions:
-      <code>Account · Cloudflare Tunnel · Edit</code> and <code>Zone · DNS · Edit</code>,
-      scoped to your zone. No per-machine <code>cloudflared tunnel login</code>, just the token.</p>
-      <pre><code><span class="c"># env (set as hades secrets when you deploy it as an app)</span>
-CF_API_TOKEN=…            <span class="c"># Tunnel:Edit + DNS:Edit</span>
+      <p>The coordinator is a small workspace binary. It needs a domain on Cloudflare and
+      <b>one API token</b> with two permissions: <code>Account · Cloudflare Tunnel · Edit</code>
+      and <code>Zone · DNS · Edit</code>, scoped to your zone. No per-machine
+      <code>cloudflared tunnel login</code>, just the token. It reads its config from the
+      environment:</p>
+      <pre><code>CF_API_TOKEN=…            <span class="c"># Tunnel:Edit + DNS:Edit</span>
 CF_ACCOUNT_ID=…
 HADES_PARENT_DOMAIN=tryhades.com
 COORDINATOR_SECRET=…      <span class="c"># hosts present this to claim</span>
 
 $ hades-coordinator       <span class="c"># serves /claim, /claims, /health on :8000</span></code></pre>
+      <p>For real use the coordinator must be <b>durable and reachable</b> from every host that
+      claims, including fleet devices. Run it under launchd (a KeepAlive agent reading the
+      token from a <code>0600</code> env file) and give it its own stable hostname: create one
+      named tunnel pointing <code>coordinator.&lt;domain&gt;</code> at <code>localhost:8099</code>,
+      run that cloudflared under launchd too, and set every hub's
+      <code>coordinator_url</code> to <code>https://coordinator.&lt;domain&gt;</code>. Now the
+      address never rotates and devices reach it over the internet.</p>
       <p>After the domain goes active on Cloudflare, turn on <b>Always Use HTTPS</b> in the
       zone's SSL settings so <code>http://</code> auto-upgrades (otherwise browsers flag plain
       HTTP as "Not Secure"). Universal SSL covers the apex and one level of wildcard
