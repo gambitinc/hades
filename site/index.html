@@ -232,39 +232,40 @@
   <div class="thesis-stage" id="stage">
 
     <div class="thesis">
-      <p class="open">Turn a spare laptop into a server.</p>
+      <p class="open">Most people don’t need the cloud.</p>
 
-      <p>Not a metaphor. The old MacBook in your drawer can serve a real
-      website to real people. It has the power — a laptop will serve a simple
-      page a hundred times a second, thousands of visitors at once, long
-      before your home internet breaks a sweat. The chip was never the limit.
-      It has just never been asked.</p>
+      <p>Turn a spare laptop into a server. Do the math with me. The laptop
+      you’re reading this on could serve a simple website tens of thousands of
+      times a second. The only real bottleneck is your home internet, and even
+      that is plenty. An ordinary connection uploads about three megabytes a
+      second. A simple page weighs thirty kilobytes. Divide. That’s a hundred
+      pages every second. Eight million a day. If a visitor clicks something
+      every twenty seconds, you can hold <em>two thousand people at
+      once</em>, at something like 80 milliseconds. From a laptop. Most
+      websites never see twenty people at once.</p>
 
-      <p>What usually stops you isn’t power, it’s getting the thing onto the
-      internet at all: a home router you can’t configure, no static IP, no
-      port to forward. HADES skips all of it. It runs your app in a container
-      and <a class="key" data-i="0" href="docs.html#first-deploy">opens an
-      outbound tunnel</a> to it — the connection dials <em>out</em> from your
-      machine, through any NAT, any home wifi, any coffee shop, and Cloudflare
-      hands back a public link. Nothing is exposed but the one app. No ports
-      opened, no address to leak.</p>
+      <p>So why are we renting? Somewhere along the way we decided hardware
+      was someone else’s job. An app written at your desk makes a stop in a
+      datacenter in Virginia before it reaches your friends. We pay monthly
+      for machines we will never see, while ours sits there, asleep, doing
+      nothing with most of its life. You already paid for the computer. You
+      just haven’t asked it to work.</p>
 
-      <p>And because it knows it’s a laptop, not a datacenter, it watches what
-      datacenters take for granted. It knows laptops sleep, so it
-      <a class="key" data-i="1" href="docs.html#uptime">writes every nap
-      down</a> and texts your phone when the machine wakes. It knows batteries
-      wear, so it <a class="key" data-i="2" href="docs.html#battery">diagnoses
-      yours</a>. It <a class="key" data-i="3" href="docs.html#json">refuses to
-      promise memory it doesn’t have</a>. And when one laptop isn’t enough,
-      <a class="key" data-i="4" href="docs.html#fleet">add another</a> — the
-      load spreads across all of them.</p>
+      <p>HADES asks it to work. You describe an app; it runs it in a
+      container and <a class="key" data-i="0" href="docs.html#first-deploy">hands you a
+      link</a>. It knows laptops sleep, so it <a class="key" data-i="1"
+      href="docs.html#uptime">writes every nap down</a> and tells your phone
+      when it’s back. It knows batteries wear out, so it <a class="key" data-i="2"
+      href="docs.html#battery">watches yours</a> and tells you why. It
+      <a class="key" data-i="3" href="docs.html#json">refuses to promise memory it
+      doesn’t have</a>, and when something must give, it gives
+      deliberately. When one computer stops being enough, <a class="key" data-i="4"
+      href="docs.html#fleet">add another</a>. The load spreads.</p>
 
-      <p>It won’t replace a datacenter for the thing a stranger pays you for;
-      a laptop sleeps and a home line wobbles, and HADES is honest about both
-      instead of pretending. But for the side project, the internal tool, the
-      demo, the bot — the thing you’d otherwise rent a box for — the hardware
-      you already own is enough. <em>Software should be shared, from your own
-      desk.</em></p>
+      <p>Software should be shared. Not provisioned, not uploaded into
+      someone else’s building. Shared, from your own desk, the way the early
+      web worked. The hardware in your house is enough.
+      <em>Build the future on it.</em></p>
 
       <p class="docline"><a href="docs.html">everything above is real, and documented</a></p>
     </div>
