@@ -91,9 +91,12 @@
   <article>
     <h1>Documentation</h1>
     <p class="lede"><b>HADES</b> — the Host-Aware Deployment &amp; Execution System — turns a
-    machine you own into a small, honest cloud: declare an app, get a container, a route,
-    and a public link. <b>Host-aware</b> means the system treats the hardware's real
-    constraints — sleep, battery, memory, load — as first-class signals, not surprises.</p>
+    laptop you own into a small, honest server: declare an app, get a container, a route,
+    and a public link. <b>Host-aware</b> means it treats a laptop's real constraints —
+    sleep, battery, scarce memory, one contended machine — as first-class signals, not
+    surprises. It is built for the side project, the internal tool, the demo — not as a
+    datacenter replacement for anything that can't tolerate a machine that occasionally
+    sleeps.</p>
 
     <!-- ════════════════════════════ -->
     <section id="install">
@@ -169,6 +172,15 @@ $ hades deploy
       swaps routes, and provisions a tunnel. Deploys are <b>idempotent upserts</b>: deploying
       an existing name replaces it with zero downtime (new replicas come up and pass health
       checks before old ones stop). Retries are always safe.</p>
+      <div class="note"><b>How the link gets public — the exposure model.</b>
+      Your machine never opens a port and never needs a static IP or a
+      configurable router. The host runs <code>cloudflared</code>, which dials
+      <i>outbound</i> to Cloudflare's edge and holds the connection open;
+      inbound requests ride back down that tunnel. So it works behind any NAT
+      or home/coffee-shop wifi, and the only thing reachable from the internet
+      is the single app you deployed — nothing else on your machine is
+      exposed. The trade is that you're trusting Cloudflare's edge to terminate
+      TLS and relay traffic.</div>
       <div class="note"><b>Quick-tunnel URLs are cattle.</b> By default apps get a fresh
       <code>*.trycloudflare.com</code> URL that changes whenever the tunnel restarts —
       <code>hades url &lt;name&gt;</code> always tells the current truth, and
