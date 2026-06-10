@@ -813,6 +813,7 @@ version = "0.2.0"
 dependencies = [
  "hades-core",
  "regex",
+ "serde_json",
  "tokio",
  "tracing",
 ]

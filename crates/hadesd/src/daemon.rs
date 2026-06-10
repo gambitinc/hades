@@ -294,7 +294,19 @@ impl Daemon {
         // for collision-avoidance; labels carry identity.
 
         let mut tunnel_note = None;
-        if self.provider.is_some() {
+        if let Some(dom) = self.config.domain.name.clone() {
+            // stable URL: just point DNS at the named tunnel; the proxy
+            // already routes <app>.<domain> by Host header
+            if let (Some(tun), true) = (
+                self.config.domain.tunnel_name.clone(),
+                hades_tunnel::cert_exists(),
+            ) {
+                if let Some(nt) = hades_tunnel::NamedTunnel::detect(&dom, &tun) {
+                    let host = format!("{}.{}", spec.name, dom);
+                    nt.route_dns(&host).await;
+                }
+            }
+        } else if self.provider.is_some() {
             self.ensure_tunnel_task(&spec.name);
         } else {
             tunnel_note = Some(
@@ -435,6 +447,9 @@ impl Daemon {
     /// tunnel alias when one is live.
     pub fn install_routes(&self, rec: &AppRecord) {
         let mut hostnames = vec![rec.spec.local_hostname()];
+        if let Some(dom) = &self.config.domain.name {
+            hostnames.push(format!("{}.{}", rec.spec.name, dom));
+        }
         if let Some(url) = &rec.tunnel_url {
             if let Some(host) = url.strip_prefix("https://") {
                 hostnames.push(host.to_string());
@@ -643,7 +658,10 @@ impl Daemon {
             priority: rec.spec.priority,
             replicas_desired: rec.spec.replicas,
             replicas_running: rec.replicas.len() as u8,
-            url: rec.tunnel_url.clone(),
+            url: match &self.config.domain.name {
+                Some(d) => Some(format!("https://{}.{}", rec.spec.name, d)),
+                None => rec.tunnel_url.clone(),
+            },
             local_url: format!(
                 "http://{}:{}",
                 rec.spec.local_hostname(),

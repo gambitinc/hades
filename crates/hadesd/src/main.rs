@@ -150,6 +150,24 @@ async fn main() {
         reg.daemon_pid = Some(std::process::id());
     });
 
+    // keep the host awake while it's hosting: caffeinate -s holds a power
+    // assertion for as long as this child lives (kill_on_drop reaps it).
+    // Lid-close sleep is separate and still needs `sudo pmset -c sleep 0`.
+    if config.keep_awake {
+        match tokio::process::Command::new("caffeinate")
+            .arg("-s")
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(child) => {
+                tracing::info!("keep-awake: holding a power assertion (caffeinate -s)");
+                // leak the handle into the runtime so it lives as long as we do
+                std::mem::forget(child);
+            }
+            Err(e) => tracing::warn!("keep-awake: caffeinate failed: {e}"),
+        }
+    }
+
     // --- event consumers ---
 
     // 1. JSONL persister: every event lands in the ledger.
@@ -299,9 +317,59 @@ async fn main() {
         });
     }
 
+    // stable URLs: a single named tunnel for the whole host when a domain
+    // is configured. It carries api.<domain> (control) and *.<domain>
+    // (apps, by Host header), so nothing rotates on restart.
+    let named = d
+        .config
+        .domain
+        .name
+        .as_deref()
+        .zip(d.config.domain.tunnel_name.as_deref())
+        .and_then(|(dom, tun)| hades_tunnel::NamedTunnel::detect(dom, tun));
+    let domain_mode = named.is_some();
+    if let Some(nt) = named {
+        let d2 = d.clone();
+        let domain = nt.domain.clone();
+        let api_port = config.api_port;
+        let proxy_port = config.proxy_port;
+        let cfg_dir = paths.root.clone();
+        tokio::spawn(async move {
+            let id = match nt.ensure().await {
+                Ok(id) => id,
+                Err(e) => {
+                    tracing::error!("named tunnel setup failed: {e}");
+                    return;
+                }
+            };
+            // route api.<domain> once; per-app hostnames are routed at deploy
+            nt.route_dns(&format!("api.{domain}")).await;
+            *d2.control_url.lock().unwrap() = Some(format!("https://api.{domain}"));
+            let cfg = match nt.write_config(&cfg_dir, &id, api_port, proxy_port) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!("named tunnel config failed: {e}");
+                    return;
+                }
+            };
+            loop {
+                match nt.run(&cfg) {
+                    Ok(mut child) => {
+                        tracing::info!("named tunnel up on {domain}");
+                        let _ = child.wait().await;
+                        tracing::warn!("named tunnel exited; respawning");
+                    }
+                    Err(e) => tracing::error!("named tunnel run: {e}"),
+                }
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        });
+    }
+
     // control tunnel: the daemon's own API, publicly reachable (auth'd),
-    // so `hades login --host <url> --token <t>` works from another machine
-    if d.provider.is_some() {
+    // so `hades login --host <url> --token <t>` works from another machine.
+    // Skipped in domain mode — api.<domain> already serves the control API.
+    if !domain_mode && d.provider.is_some() {
         let d2 = d.clone();
         tokio::spawn(async move {
             while let Some(provider) = d2.provider.as_ref() {

@@ -28,8 +28,23 @@ pub struct HadesConfig {
     /// two purposes: `hades update` rebuilds from it, and the daemon offers
     /// it to fleet devices at GET /host/src so updates propagate hub→device.
     pub source_dir: Option<String>,
+    /// Hold a macOS power assertion (caffeinate -s) so the host never
+    /// idle-sleeps while hosting. Lid-close sleep still needs pmset.
+    pub keep_awake: bool,
     pub notify: NotifyConfig,
     pub fleet: FleetConfig,
+    pub domain: DomainConfig,
+}
+
+/// Stable URLs via a named Cloudflare tunnel. When `name` is set (and
+/// `cloudflared tunnel login` has been run), apps live at
+/// https://<app>.<name> and the control API at https://api.<name> —
+/// nothing rotates on restart anymore.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DomainConfig {
+    pub name: Option<String>,
+    pub tunnel_name: Option<String>,
 }
 
 /// Device-side record of who owns this machine. Written by
@@ -65,8 +80,10 @@ impl Default for HadesConfig {
             disk_min_free_gb: 5.0,
             auth_token: None,
             source_dir: None,
+            keep_awake: true,
             notify: NotifyConfig::default(),
             fleet: FleetConfig::default(),
+            domain: DomainConfig::default(),
         }
     }
 }

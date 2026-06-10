@@ -152,6 +152,16 @@ enum HostCmd {
     /// Print the command another machine runs to control this host
     /// (control-tunnel URL + bearer token). Treat it like a password.
     ConnectInfo,
+    /// Put this host on your own domain for stable URLs. Apps become
+    /// https://<app>.<domain>, the API https://api.<domain> — nothing
+    /// rotates on restart. Requires `cloudflared tunnel login` first.
+    Domain {
+        /// Your domain (must be on Cloudflare), e.g. apps.example.com.
+        domain: String,
+        /// Tunnel name (default: "hades").
+        #[arg(long, default_value = "hades")]
+        tunnel: String,
+    },
     /// Join this machine to a fleet: registers this device with the hub and
     /// marks it as yours. Run on the NEW device.
     Join {
@@ -263,6 +273,21 @@ fn load_session() -> Option<Session> {
 
 /// The session (written by `hades login`) decides which host commands talk
 /// to; without one, fall back to the local daemon + local config token.
+fn hades_host_cert_present() -> bool {
+    std::env::var("HOME")
+        .map(|h| std::path::Path::new(&h).join(".cloudflared/cert.pem").exists())
+        .unwrap_or(false)
+}
+
+fn host_uid() -> u32 {
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+        .unwrap_or(501)
+}
+
 fn client() -> DaemonClient {
     if let Some(s) = load_session() {
         return DaemonClient::for_host(&s.host, s.token);
@@ -546,6 +571,50 @@ async fn host_cmd(cmd: HostCmd, json: bool) -> ExitCode {
             }
             Err(e) => fail(e, json),
         },
+        HostCmd::Domain { domain, tunnel } => {
+            if !hades_host_cert_present() {
+                return fail(
+                    HadesError::Other(
+                        "first authorize cloudflared with your domain:\n    cloudflared tunnel login\nthen re-run this command".into(),
+                    ),
+                    json,
+                );
+            }
+            let mut cfg = config.clone();
+            cfg.domain.name = Some(domain.clone());
+            cfg.domain.tunnel_name = Some(tunnel.clone());
+            if let Err(e) = cfg.save(&paths.config()) {
+                return fail(HadesError::Other(format!("cannot save config: {e}")), json);
+            }
+            // restart the daemon so it brings up the named tunnel
+            let _ = std::process::Command::new("launchctl")
+                .args([
+                    "kickstart",
+                    "-k",
+                    &format!("gui/{}/com.hades.daemon", host_uid()),
+                ])
+                .output();
+            if json {
+                render::json(&serde_json::json!({
+                    "domain": domain, "tunnel": tunnel,
+                    "api": format!("https://api.{domain}"),
+                    "app_pattern": format!("https://<app>.{domain}"),
+                }));
+            } else {
+                println!();
+                println!("  ⚖ this host is now {domain}");
+                println!();
+                println!("    apps     https://<app>.{domain}");
+                println!("    api      https://api.{domain}");
+                println!();
+                println!("  add a wildcard CNAME at your DNS so new apps resolve:");
+                println!("    *.{domain}   →   (cloudflared creates per-app records too)");
+                println!();
+                println!("  the daemon is restarting onto the named tunnel.");
+                println!("  re-run `hades host connect-info` for the stable join line.");
+            }
+            ExitCode::SUCCESS
+        }
         HostCmd::ConnectInfo => {
             let local = DaemonClient::for_host(
                 &format!("127.0.0.1:{}", config.api_port),

@@ -189,6 +189,37 @@ pub async fn run_doctor(
         )),
     }
 
+    // 7a. Keep-awake assertion present when configured.
+    if config.keep_awake {
+        let held = std::process::Command::new("pmset")
+            .arg("-g")
+            .arg("assertions")
+            .output()
+            .ok()
+            .map(|o| {
+                let s = String::from_utf8_lossy(&o.stdout);
+                s.contains("PreventUserIdleSystemSleep") && s.contains("caffeinate")
+            })
+            .unwrap_or(false);
+        if held {
+            checks.push(Check::pass("keep-awake", "power assertion held — host won't idle-sleep"));
+        } else {
+            checks.push(Check::warn(
+                "keep-awake",
+                "no power assertion yet (daemon just started, or caffeinate missing)",
+                "the daemon holds caffeinate -s; check ~/.hades/logs if this persists",
+            ));
+        }
+    }
+
+    // 7b. Domain mode.
+    if let Some(dom) = &config.domain.name {
+        checks.push(Check::pass(
+            "domain",
+            format!("stable URLs on {dom} (api.{dom} + *.{dom})"),
+        ));
+    }
+
     // 7. Notification channel configured.
     match &config.notify.ntfy_topic {
         Some(topic) => checks.push(Check::pass(

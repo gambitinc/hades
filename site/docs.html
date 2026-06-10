@@ -298,6 +298,7 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
         <tr><td>hades update [--from &lt;url&gt;]</td><td>self-update: refresh source (checkout › git › your hub › --from), rebuild, swap binaries, restart the daemon</td></tr>
         <tr><td>hades fleet update</td><td>every joined device self-updates, pulling source from this hub</td></tr>
         <tr><td>hades ssh &lt;device&gt; [--user]</td><td>shell into a fleet device — hades opens an ssh:// tunnel, auth stays plain ssh (Remote Login must be on there)</td></tr>
+        <tr><td>hades host domain &lt;domain&gt;</td><td>stable URLs on your own domain via a named tunnel: apps at https://&lt;app&gt;.&lt;domain&gt;, API at https://api.&lt;domain&gt;</td></tr>
         <tr><td>hades init</td><td>scaffold a Hades.toml in the current directory</td></tr>
         <tr><td>hades deploy [--app] [--dir] [--device]</td><td>idempotent upsert: build/pull, health-gate, swap routes, print the link</td></tr>
         <tr><td>hades apps list</td><td>all apps with state, replicas, memory, URLs</td></tr>
@@ -438,6 +439,8 @@ $ hades fleet remove macbook      <span class="c"># apps keep running there</spa
         <tr><td>notify.mac_notifications</td><td>true</td><td>also notify the local notification center</td></tr>
         <tr><td>notify.healthchecks_url</td><td>—</td><td>dead-man's switch ping URL</td></tr>
         <tr><td>fleet.hub_url / fleet.hub_token</td><td>—</td><td>written by <code>hades host join</code>: which hub owns this device</td></tr>
+        <tr><td>keep_awake</td><td>true</td><td>hold a caffeinate power assertion so the host never idle-sleeps while hosting</td></tr>
+        <tr><td>domain.name / domain.tunnel_name</td><td>—</td><td>set by <code>hades host domain</code>: stable URLs via a named Cloudflare tunnel</td></tr>
         <tr><td>source_dir</td><td>set by installer</td><td>where this host's source lives — rebuilt by <code>hades update</code>, served to devices at /host/src</td></tr>
       </table>
       <p>State lives under <code>~/.hades/</code>: desired state and the process registry in

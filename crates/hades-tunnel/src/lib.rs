@@ -65,6 +65,135 @@ pub fn find_cloudflared() -> Option<PathBuf> {
     None
 }
 
+/// A named Cloudflare tunnel: stable hostnames on your own domain. One
+/// process carries everything — `*.<domain>` lands on the proxy (which
+/// routes by Host header) and `api.<domain>` on the daemon API.
+pub struct NamedTunnel {
+    pub domain: String,
+    pub tunnel: String,
+    binary: PathBuf,
+}
+
+pub fn cert_exists() -> bool {
+    std::env::var("HOME")
+        .map(|h| std::path::Path::new(&h).join(".cloudflared/cert.pem").exists())
+        .unwrap_or(false)
+}
+
+impl NamedTunnel {
+    /// Some only when cloudflared is installed AND `cloudflared tunnel
+    /// login` has been completed (cert.pem present).
+    pub fn detect(domain: &str, tunnel: &str) -> Option<Self> {
+        if !cert_exists() {
+            return None;
+        }
+        Some(Self {
+            domain: domain.to_string(),
+            tunnel: tunnel.to_string(),
+            binary: find_cloudflared()?,
+        })
+    }
+
+    async fn find_id(&self) -> Result<Option<String>, HadesError> {
+        let list = Command::new(&self.binary)
+            .args(["tunnel", "list", "--output", "json"])
+            .output()
+            .await
+            .map_err(|e| HadesError::Tunnel(format!("cloudflared tunnel list: {e}")))?;
+        if !list.status.success() {
+            return Err(HadesError::Tunnel(format!(
+                "tunnel list failed: {}",
+                String::from_utf8_lossy(&list.stderr).trim()
+            )));
+        }
+        let v: serde_json::Value = serde_json::from_slice(&list.stdout)
+            .map_err(|e| HadesError::Tunnel(format!("bad tunnel list json: {e}")))?;
+        Ok(v.as_array().and_then(|arr| {
+            arr.iter()
+                .find(|t| t["name"].as_str() == Some(self.tunnel.as_str()))
+                .and_then(|t| t["id"].as_str().map(String::from))
+        }))
+    }
+
+    /// Create the tunnel if it doesn't exist; return its UUID.
+    pub async fn ensure(&self) -> Result<String, HadesError> {
+        if let Some(id) = self.find_id().await? {
+            return Ok(id);
+        }
+        let create = Command::new(&self.binary)
+            .args(["tunnel", "create", &self.tunnel])
+            .output()
+            .await
+            .map_err(|e| HadesError::Tunnel(format!("tunnel create: {e}")))?;
+        if !create.status.success() {
+            return Err(HadesError::Tunnel(format!(
+                "tunnel create failed: {}",
+                String::from_utf8_lossy(&create.stderr).trim()
+            )));
+        }
+        self.find_id()
+            .await?
+            .ok_or_else(|| HadesError::Tunnel("created tunnel but cannot find its id".into()))
+    }
+
+    /// Ingress config: api.<domain> → daemon, *.<domain> → proxy, 404 sink.
+    pub fn write_config(
+        &self,
+        dir: &std::path::Path,
+        tunnel_id: &str,
+        api_port: u16,
+        proxy_port: u16,
+    ) -> Result<PathBuf, HadesError> {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let mut cfg = String::new();
+        cfg.push_str(&format!("tunnel: {tunnel_id}\n"));
+        cfg.push_str(&format!("credentials-file: {home}/.cloudflared/{tunnel_id}.json\n"));
+        cfg.push_str("ingress:\n");
+        cfg.push_str(&format!("  - hostname: api.{}\n", self.domain));
+        cfg.push_str(&format!("    service: http://localhost:{api_port}\n"));
+        cfg.push_str(&format!("  - hostname: \"*.{}\"\n", self.domain));
+        cfg.push_str(&format!("    service: http://localhost:{proxy_port}\n"));
+        cfg.push_str("  - service: http_status:404\n");
+        let path = dir.join("cloudflared.yml");
+        std::fs::write(&path, cfg)?;
+        Ok(path)
+    }
+
+    /// Point a hostname at the tunnel (idempotent; "already exists" is fine).
+    pub async fn route_dns(&self, hostname: &str) {
+        let out = Command::new(&self.binary)
+            .args(["tunnel", "route", "dns", &self.tunnel, hostname])
+            .output()
+            .await;
+        match out {
+            Ok(o) if o.status.success() => {
+                tracing::info!(hostname, "dns route ready");
+            }
+            Ok(o) => {
+                let err = String::from_utf8_lossy(&o.stderr);
+                if !err.contains("already exists") && !err.contains("already configured") {
+                    tracing::warn!(hostname, "dns route: {}", err.trim());
+                }
+            }
+            Err(e) => tracing::warn!(hostname, "dns route failed: {e}"),
+        }
+    }
+
+    /// Run the tunnel (caller supervises; respawn on exit).
+    pub fn run(&self, config_path: &std::path::Path) -> Result<Child, HadesError> {
+        Command::new(&self.binary)
+            .args(["tunnel", "--config"])
+            .arg(config_path)
+            .arg("run")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| HadesError::Tunnel(format!("tunnel run: {e}")))
+    }
+}
+
 pub struct QuickTunnelProvider {
     binary: PathBuf,
 }
