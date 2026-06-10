@@ -450,6 +450,9 @@ impl Daemon {
         if let Some(dom) = &self.config.domain.name {
             hostnames.push(format!("{}.{}", rec.spec.name, dom));
         }
+        if let Some(claim) = self.store.claim_for(&rec.spec.name) {
+            hostnames.push(claim.hostname);
+        }
         if let Some(url) = &rec.tunnel_url {
             if let Some(host) = url.strip_prefix("https://") {
                 hostnames.push(host.to_string());
@@ -579,6 +582,9 @@ impl Daemon {
             reg.cloudflared.remove(name);
         });
         self.secrets.remove(name);
+        if self.store.claim_for(name).is_some() {
+            let _ = self.domain_release(name).await;
+        }
         self.emit(HostEvent::AppDestroyed { app: name.into() });
         let mut info = self.app_info(&rec);
         info.state = AppState::Stopped;
@@ -658,10 +664,18 @@ impl Daemon {
             priority: rec.spec.priority,
             replicas_desired: rec.spec.replicas,
             replicas_running: rec.replicas.len() as u8,
-            url: match &self.config.domain.name {
-                Some(d) => Some(format!("https://{}.{}", rec.spec.name, d)),
-                None => rec.tunnel_url.clone(),
-            },
+            url: self
+                .store
+                .claim_for(&rec.spec.name)
+                .map(|c| format!("https://{}", c.hostname))
+                .or_else(|| {
+                    self.config
+                        .domain
+                        .name
+                        .as_ref()
+                        .map(|d| format!("https://{}.{}", rec.spec.name, d))
+                })
+                .or_else(|| rec.tunnel_url.clone()),
             local_url: format!(
                 "http://{}:{}",
                 rec.spec.local_hostname(),
@@ -675,11 +689,181 @@ impl Daemon {
         }
     }
 
+    // ----- stable-domain claims -----
+
+    /// Claim <name>.<domain> for an app via the operator's coordinator:
+    /// get a connector token, run cloudflared with it, alias the hostname
+    /// to the app. The coordinator already pointed DNS + ingress at us.
+    pub async fn domain_claim(
+        self: &std::sync::Arc<Self>,
+        app: &str,
+        name: &str,
+    ) -> Result<crate::state::ClaimRecord, HadesError> {
+        if self.store.get(app).is_none() {
+            return Err(HadesError::AppNotFound(app.into()));
+        }
+        let coord = self
+            .config
+            .domain
+            .coordinator_url
+            .clone()
+            .ok_or_else(|| {
+                HadesError::Other(
+                    "no coordinator configured — set domain.coordinator_url (ask your operator)"
+                        .into(),
+                )
+            })?;
+        // release any previous claim for this app first
+        if self.store.claim_for(app).is_some() {
+            let _ = self.domain_release(app).await;
+        }
+
+        let proxy_url = format!("http://localhost:{}", self.config.proxy_port);
+        let mut req = self
+            .http
+            .post(format!("{}/claim", coord.trim_end_matches('/')))
+            .json(&serde_json::json!({ "name": name, "proxy_url": proxy_url }));
+        if let Some(sec) = &self.config.domain.coordinator_secret {
+            req = req.header("x-hades-secret", sec);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| HadesError::Other(format!("coordinator unreachable: {e}")))?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            let msg = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|v| v["error"].as_str().map(String::from))
+                .unwrap_or(body);
+            return Err(HadesError::Other(format!("claim refused: {msg}")));
+        }
+        let v: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| HadesError::Other(e.to_string()))?;
+        let hostname = v["hostname"].as_str().unwrap_or_default().to_string();
+        let token = v["connector_token"].as_str().unwrap_or_default().to_string();
+        if hostname.is_empty() || token.is_empty() {
+            return Err(HadesError::Other("coordinator returned an incomplete claim".into()));
+        }
+
+        let record = crate::state::ClaimRecord {
+            app: app.to_string(),
+            name: name.to_string(),
+            hostname: hostname.clone(),
+            connector_token: token.clone(),
+        };
+        self.store.update_claims(|c| {
+            c.insert(app.to_string(), record.clone());
+        });
+        self.spawn_claim_tunnel(&record);
+        if let Some(rec) = self.store.get(app) {
+            self.install_routes(&rec);
+        }
+        self.emit(HostEvent::UrlChanged {
+            app: app.to_string(),
+            old: None,
+            new: format!("https://{hostname}"),
+        });
+        Ok(record)
+    }
+
+    pub async fn domain_release(&self, app: &str) -> Result<String, HadesError> {
+        let claim = self
+            .store
+            .claim_for(app)
+            .ok_or_else(|| HadesError::Other(format!("{app} has no claimed domain")))?;
+        // stop the tunnel
+        self.stop_tunnel_task(&format!("__claim_{app}"));
+        if let Some(pid) = self
+            .store
+            .registry_snapshot()
+            .cloudflared
+            .get(&format!("__claim_{app}"))
+            .copied()
+        {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .output();
+        }
+        self.store.update_registry(|r| {
+            r.cloudflared.remove(&format!("__claim_{app}"));
+        });
+        // tell the coordinator to drop the tunnel + DNS
+        if let Some(coord) = &self.config.domain.coordinator_url {
+            let mut req = self
+                .http
+                .delete(format!("{}/claim/{}", coord.trim_end_matches('/'), claim.name));
+            if let Some(sec) = &self.config.domain.coordinator_secret {
+                req = req.header("x-hades-secret", sec);
+            }
+            let _ = req.send().await;
+        }
+        self.store.update_claims(|c| {
+            c.remove(app);
+        });
+        if let Some(rec) = self.store.get(app) {
+            self.install_routes(&rec);
+        }
+        Ok(claim.hostname)
+    }
+
+    /// Supervise one claim's cloudflared (respawn on exit until released).
+    pub fn spawn_claim_tunnel(self: &std::sync::Arc<Self>, claim: &crate::state::ClaimRecord) {
+        let key = format!("__claim_{}", claim.app);
+        let mut cancels = self.tunnel_cancels.lock().unwrap();
+        if cancels.contains_key(&key) {
+            return;
+        }
+        let token = CancellationToken::new();
+        cancels.insert(key.clone(), token.clone());
+        drop(cancels);
+
+        let d = self.clone();
+        let claim = claim.clone();
+        tokio::spawn(async move {
+            loop {
+                if token.is_cancelled() {
+                    break;
+                }
+                match hades_tunnel::run_token_tunnel(&claim.connector_token) {
+                    Ok(mut child) => {
+                        if let Some(pid) = child.id() {
+                            d.store.update_registry(|r| {
+                                r.cloudflared.insert(key.clone(), pid);
+                            });
+                        }
+                        tracing::info!(app = %claim.app, host = %claim.hostname, "claim tunnel up");
+                        tokio::select! {
+                            _ = token.cancelled() => { let _ = child.kill().await; break; }
+                            _ = child.wait() => {
+                                tracing::warn!(app = %claim.app, "claim tunnel exited; respawning");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(app = %claim.app, "claim tunnel failed: {e}");
+                        tokio::select! {
+                            _ = token.cancelled() => break,
+                            _ = tokio::time::sleep(Duration::from_secs(15)) => {}
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        });
+    }
+
     // ----- startup reconcile -----
 
     /// Bring persisted desired state back to life after a daemon restart:
     /// containers running, routes registered, tunnels supervised.
     pub async fn reconcile_all(self: &std::sync::Arc<Self>) {
+        // bring claimed-domain tunnels back up
+        for claim in self.store.claims_snapshot().values() {
+            self.spawn_claim_tunnel(claim);
+        }
         let apps = self.store.snapshot();
         for (name, rec) in apps {
             let mut alive = Vec::new();

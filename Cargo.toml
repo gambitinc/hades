@@ -10,6 +10,7 @@ members = [
     "crates/hades-tunnel",
     "crates/hadesd",
     "crates/hades-cli",
+    "crates/hades-coordinator",
 ]
 
 [workspace.package]

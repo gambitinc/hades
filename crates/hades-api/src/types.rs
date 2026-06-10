@@ -237,6 +237,18 @@ pub struct SecretsView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainClaim {
+    pub app: String,
+    pub name: String,
+    pub hostname: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainClaimList {
+    pub claims: Vec<DomainClaim>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub ok: bool,
     pub version: String,

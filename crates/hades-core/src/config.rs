@@ -45,6 +45,10 @@ pub struct HadesConfig {
 pub struct DomainConfig {
     pub name: Option<String>,
     pub tunnel_name: Option<String>,
+    /// A hades-coordinator that hands out stable <name>.<domain> subdomains
+    /// (operator-run). Set on hosts so `hades domain claim` knows where to go.
+    pub coordinator_url: Option<String>,
+    pub coordinator_secret: Option<String>,
 }
 
 /// Device-side record of who owns this machine. Written by

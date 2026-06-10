@@ -126,7 +126,7 @@ async fn main() {
     let d = Arc::new(Daemon {
         notifiers: Notifiers::from_config(&config.notify),
         provider: QuickTunnelProvider::detect(),
-        store: Store::load(paths.apps_state(), paths.registry(), paths.fleet_state()),
+        store: Store::load(paths.apps_state(), paths.registry(), paths.fleet_state(), paths.claims_state()),
         table: RouteTable::new(),
         tunnel_cancels: Mutex::new(Default::default()),
         doctor_green: AtomicBool::new(false),

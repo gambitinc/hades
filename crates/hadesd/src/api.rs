@@ -98,6 +98,9 @@ pub fn router(d: D) -> Router {
         .route("/host/src", get(host_src))
         .route("/host/update", post(host_update))
         .route("/host/ssh", post(host_ssh))
+        .route("/domain/claim", post(domain_claim))
+        .route("/domain/claim/{app}", delete(domain_release))
+        .route("/domain/claims", get(domain_claims))
         .route("/fleet/devices/{name}/ssh", post(fleet_ssh))
         .route("/fleet", get(fleet_list))
         .route("/fleet/devices", post(fleet_join))
@@ -395,6 +398,59 @@ async fn fleet_update(State(d): State<D>) -> Response {
 /// Open (or reuse) an ssh:// tunnel to this machine's sshd. The tunnel is
 /// only a road — authentication stays plain old ssh against this Mac's
 /// user accounts.
+#[derive(Deserialize)]
+struct ClaimBody {
+    app: String,
+    name: String,
+}
+
+async fn domain_claim(State(d): State<D>, Json(b): Json<ClaimBody>) -> Response {
+    // an app placed on a fleet device claims through that device
+    if let Some((_dev, client)) = remote_for(&d, &b.app) {
+        return match client.domain_claim(&b.app, &b.name).await {
+            Ok(c) => Json(c).into_response(),
+            Err(e) => err_response(&e.error, None),
+        };
+    }
+    match d.domain_claim(&b.app, &b.name).await {
+        Ok(rec) => Json(hades_api::types::DomainClaim {
+            app: rec.app,
+            name: rec.name,
+            hostname: rec.hostname,
+        })
+        .into_response(),
+        Err(e) => err_response(&e, None),
+    }
+}
+
+async fn domain_release(State(d): State<D>, Path(app): Path<String>) -> Response {
+    if let Some((_dev, client)) = remote_for(&d, &app) {
+        return match client.domain_release(&app).await {
+            Ok(v) => Json(v).into_response(),
+            Err(e) => err_response(&e.error, None),
+        };
+    }
+    match d.domain_release(&app).await {
+        Ok(host) => Json(serde_json::json!({ "released": host })).into_response(),
+        Err(e) => err_response(&e, None),
+    }
+}
+
+async fn domain_claims(State(d): State<D>) -> Json<hades_api::types::DomainClaimList> {
+    let mut claims: Vec<_> = d
+        .store
+        .claims_snapshot()
+        .into_values()
+        .map(|c| hades_api::types::DomainClaim {
+            app: c.app,
+            name: c.name,
+            hostname: c.hostname,
+        })
+        .collect();
+    claims.sort_by(|a, b| a.app.cmp(&b.app));
+    Json(hades_api::types::DomainClaimList { claims })
+}
+
 async fn host_ssh(State(d): State<D>) -> Response {
     let sshd_up = tokio::time::timeout(
         std::time::Duration::from_secs(2),

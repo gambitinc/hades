@@ -739,6 +739,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hades-coordinator"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "hades-core"
 version = "0.2.0"
 dependencies = [

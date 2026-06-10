@@ -116,11 +116,37 @@ enum Cmd {
         #[arg(long)]
         from: Option<String>,
     },
+    /// Claim a stable custom URL for an app: https://<name>.<domain>,
+    /// served through your operator's coordinator. No Cloudflare account
+    /// needed. The URL never changes.
+    Domain {
+        #[command(subcommand)]
+        cmd: DomainCmd,
+    },
     /// Notification utilities.
     Notify {
         #[command(subcommand)]
         cmd: NotifyCmd,
     },
+}
+
+#[derive(Subcommand)]
+enum DomainCmd {
+    /// Claim <name> for an app — it becomes https://<name>.<domain> forever.
+    Claim {
+        /// The subdomain label you want (lowercase [a-z0-9-]).
+        name: String,
+        /// App to point it at (default: the Hades.toml here).
+        #[arg(long)]
+        app: Option<String>,
+    },
+    /// Give up an app's claimed domain.
+    Release {
+        #[arg(long)]
+        app: Option<String>,
+    },
+    /// List claimed domains.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -152,13 +178,11 @@ enum HostCmd {
     /// Print the command another machine runs to control this host
     /// (control-tunnel URL + bearer token). Treat it like a password.
     ConnectInfo,
-    /// Put this host on your own domain for stable URLs. Apps become
-    /// https://<app>.<domain>, the API https://api.<domain> — nothing
-    /// rotates on restart. Requires `cloudflared tunnel login` first.
+    /// (operator) Put this host on a domain you own via a named tunnel:
+    /// apps at https://<app>.<domain>, API at https://api.<domain>.
+    /// Requires `cloudflared tunnel login` first.
     Domain {
-        /// Your domain (must be on Cloudflare), e.g. apps.example.com.
         domain: String,
-        /// Tunnel name (default: "hades").
         #[arg(long, default_value = "hades")]
         tunnel: String,
     },
@@ -369,6 +393,7 @@ async fn main() -> ExitCode {
             }
         }
         Cmd::Events { follow, days } => stream_events(follow, days, json).await,
+        Cmd::Domain { cmd } => domain_cmd(cmd, json).await,
         Cmd::Notify { cmd: NotifyCmd::Test } => match client().notify_test().await {
             Ok(r) => {
                 if json {
@@ -1155,6 +1180,67 @@ async fn fleet_cmd(cmd: FleetCmd, json: bool) -> ExitCode {
                     println!("    hades host join --hub {url} --token {token}");
                     println!();
                     println!("  the URL rotates when this hub restarts; the token does not.");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e, json),
+        },
+    }
+}
+
+async fn domain_cmd(cmd: DomainCmd, json: bool) -> ExitCode {
+    let c = client();
+    match cmd {
+        DomainCmd::Claim { name, app } => {
+            let app = match app_or_manifest(app) {
+                Ok(a) => a,
+                Err(e) => return fail(e, json),
+            };
+            eprintln!("claiming {name} for {app}…");
+            match c.domain_claim(&app, &name).await {
+                Ok(claim) => {
+                    if json {
+                        render::json(&claim);
+                    } else {
+                        println!();
+                        println!("  ⚖ {} is yours", claim.hostname);
+                        println!();
+                        println!("    https://{}", claim.hostname);
+                        println!();
+                        println!("  this URL is stable — it survives restarts and never rotates.");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e, json),
+            }
+        }
+        DomainCmd::Release { app } => {
+            let app = match app_or_manifest(app) {
+                Ok(a) => a,
+                Err(e) => return fail(e, json),
+            };
+            match c.domain_release(&app).await {
+                Ok(v) => {
+                    if json {
+                        render::json(&v);
+                    } else {
+                        println!("released {}", v["released"].as_str().unwrap_or(&app));
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e, json),
+            }
+        }
+        DomainCmd::List => match c.domain_list().await {
+            Ok(list) => {
+                if json {
+                    render::json(&list);
+                } else if list.claims.is_empty() {
+                    println!("no claimed domains — `hades domain claim <name>`");
+                } else {
+                    for cl in &list.claims {
+                        println!("{:<16} https://{}", cl.app, cl.hostname);
+                    }
                 }
                 ExitCode::SUCCESS
             }

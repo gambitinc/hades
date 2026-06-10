@@ -74,6 +74,21 @@ pub struct NamedTunnel {
     binary: PathBuf,
 }
 
+/// Run `cloudflared tunnel run --token <token>` for a remotely-managed
+/// tunnel the coordinator created. Returns the supervised child.
+pub fn run_token_tunnel(token: &str) -> Result<Child, HadesError> {
+    let bin = find_cloudflared()
+        .ok_or_else(|| HadesError::Tunnel("cloudflared not installed".into()))?;
+    Command::new(bin)
+        .args(["tunnel", "--no-autoupdate", "run", "--token", token])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| HadesError::Tunnel(format!("tunnel run --token: {e}")))
+}
+
 pub fn cert_exists() -> bool {
     std::env::var("HOME")
         .map(|h| std::path::Path::new(&h).join(".cloudflared/cert.pem").exists())

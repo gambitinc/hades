@@ -56,6 +56,16 @@ pub struct Registry {
     pub daemon_pid: Option<u32>,
 }
 
+/// A stable-domain claim for one app: <name>.<domain> served via a
+/// coordinator-issued cloudflared tunnel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimRecord {
+    pub app: String,
+    pub name: String,
+    pub hostname: String,
+    pub connector_token: String,
+}
+
 /// The hub's record of its fleet: joined devices plus where remote apps
 /// were placed.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -69,13 +79,20 @@ pub struct Store {
     apps_path: PathBuf,
     registry_path: PathBuf,
     fleet_path: PathBuf,
+    claims_path: PathBuf,
     apps: Mutex<HashMap<String, AppRecord>>,
     registry: Mutex<Registry>,
     fleet: Mutex<FleetFile>,
+    claims: Mutex<HashMap<String, ClaimRecord>>,
 }
 
 impl Store {
-    pub fn load(apps_path: PathBuf, registry_path: PathBuf, fleet_path: PathBuf) -> Self {
+    pub fn load(
+        apps_path: PathBuf,
+        registry_path: PathBuf,
+        fleet_path: PathBuf,
+        claims_path: PathBuf,
+    ) -> Self {
         let apps = std::fs::read_to_string(&apps_path)
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
@@ -88,14 +105,43 @@ impl Store {
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
             .unwrap_or_default();
+        let claims = std::fs::read_to_string(&claims_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
         Self {
             apps_path,
             registry_path,
             fleet_path,
+            claims_path,
             apps: Mutex::new(apps),
             registry: Mutex::new(registry),
             fleet: Mutex::new(fleet),
+            claims: Mutex::new(claims),
         }
+    }
+
+    pub fn claims_snapshot(&self) -> HashMap<String, ClaimRecord> {
+        self.claims.lock().unwrap().clone()
+    }
+
+    pub fn claim_for(&self, app: &str) -> Option<ClaimRecord> {
+        self.claims.lock().unwrap().get(app).cloned()
+    }
+
+    pub fn update_claims<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut HashMap<String, ClaimRecord>) -> R,
+    {
+        let mut claims = self.claims.lock().unwrap();
+        let r = f(&mut claims);
+        if let Ok(json) = serde_json::to_string_pretty(&*claims) {
+            let tmp = self.claims_path.with_extension("tmp");
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, &self.claims_path);
+            }
+        }
+        r
     }
 
     fn persist_apps(&self, apps: &HashMap<String, AppRecord>) {

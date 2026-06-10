@@ -278,6 +278,36 @@ impl DaemonClient {
             .map_err(|e| ApiError::from(HadesError::Other(e.to_string())))
     }
 
+    pub async fn domain_claim(&self, app: &str, name: &str) -> Result<DomainClaim, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/domain/claim", self.base)))
+                .json(&serde_json::json!({ "app": app, "name": name }))
+                .timeout(std::time::Duration::from_secs(60))
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    pub async fn domain_release(&self, app: &str) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(self.http.delete(format!("{}/domain/claim/{app}", self.base)))
+                .timeout(std::time::Duration::from_secs(60))
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    pub async fn domain_list(&self) -> Result<DomainClaimList, ApiError> {
+        Self::check(
+            self.auth(self.http.get(format!("{}/domain/claims", self.base)))
+                .send()
+                .await,
+        )
+        .await
+    }
+
     /// Open an ssh tunnel on this host (returns {url, user_hint}).
     pub async fn host_ssh(&self) -> Result<serde_json::Value, ApiError> {
         Self::check(

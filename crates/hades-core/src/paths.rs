@@ -33,6 +33,9 @@ impl HadesPaths {
     pub fn fleet_state(&self) -> PathBuf {
         self.state_dir().join("fleet.json")
     }
+    pub fn claims_state(&self) -> PathBuf {
+        self.state_dir().join("claims.json")
+    }
     pub fn ledger_dir(&self) -> PathBuf {
         self.root.join("ledger")
     }
