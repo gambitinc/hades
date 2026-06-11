@@ -82,9 +82,13 @@
   <div class="grid">
     <div class="cell wide">
       <div class="label">Max req / sec · whole fleet</div>
-      <div class="big"><span id="capacity">…</span><span class="u">req/s</span></div>
+      <div class="big"><span id="capacity">…</span><span class="u">req/s effective</span></div>
+      <div class="sub" id="capacity-sub">bounded by your internet</div>
+      <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+        <span class="big gold" id="capacity-potential" style="font-size:34px">…</span><span class="u">req/s potential</span>
+        <div class="sub" id="capacity-potential-sub">the hardware ceiling — with a faster uplink</div>
+      </div>
       <canvas class="spark" id="spark"></canvas>
-      <div class="sub" id="capacity-sub">measuring…</div>
     </div>
     <div class="cell">
       <div class="label">Machines in fleet</div>
@@ -168,14 +172,18 @@ async function poll(){
 
   // headline capacity
   const cap = m.capacity;
-  // headline = whole-fleet effective max req/s (internet-capped); the sub-line
-  // shows the raw hardware ceiling and how the uplink caps it
+  // effective = internet-bounded (what you can serve now); potential = the
+  // hardware ceiling (the big number you'd hit with a faster uplink)
   $('capacity').textContent = m.fleet.capacity_req_per_sec == null ? '…' : fmt(m.fleet.capacity_req_per_sec);
+  $('capacity-potential').textContent = m.fleet.machine_req_per_sec == null ? '…' : fmt(m.fleet.machine_req_per_sec);
   $('capacity-sub').innerHTML =
-    `across <b>${m.fleet.count}</b> machine${m.fleet.count===1?'':'s'} · hardware can do <b>${fmt(m.fleet.machine_req_per_sec)}</b> r/s`
+    `across <b>${m.fleet.count}</b> machine${m.fleet.count===1?'':'s'}`
     + (cap.network_req_per_sec == null
         ? ' · <span class="muted">measuring uplink…</span>'
-        : `, <span class="muted">uplink caps real traffic to <b>${fmt(m.fleet.capacity_req_per_sec)}</b>/s at ${cap.avg_response_kb.toFixed(0)}KB pages</span>`);
+        : ` · <span class="muted">capped by your internet at ${cap.avg_response_kb.toFixed(0)}KB pages</span>`);
+  $('capacity-potential-sub').innerHTML =
+    `the hardware ceiling — with a faster uplink`
+    + (cap.upload_mbps != null ? ` <span class="muted">(you're on ~${cap.upload_mbps.toFixed(0)} Mbps up now)</span>` : '');
 
   // machines
   $('machines').textContent = m.fleet.count;
