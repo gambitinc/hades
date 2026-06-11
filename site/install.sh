@@ -132,12 +132,14 @@ if [ -n "${HADES_HUB:-}" ] && [ -n "${HADES_TOKEN:-}" ]; then
 # /dev/tty so the prompt works even though stdin is the curl pipe
 elif [ -e /dev/tty ]; then
   printf "\n  ${BONE}already running hades on another machine?${OFF}\n"
-  printf "  ${DIM}paste its connect line (from \`hades host connect-info\` there)\n"
-  printf "  to add this device to your fleet — or press Enter to make this\n"
-  printf "  the first host.${OFF}\n\n  > "
+  printf "  ${DIM}on that machine run \`hades host connect-info\` and paste its\n"
+  printf "  \`hades host join …\` line here to add this device to your fleet,\n"
+  printf "  or press Enter to make this the first host.${OFF}\n\n  > "
   read -r JOIN_LINE < /dev/tty || JOIN_LINE=""
   if [ -n "$JOIN_LINE" ]; then
-    HUB_URL=$(printf '%s' "$JOIN_LINE" | sed -n 's/.*--host \([^ ]*\).*/\1/p')
+    # accept either the `host join --hub …` line or the `login --host …` line
+    HUB_URL=$(printf '%s' "$JOIN_LINE" | sed -n 's/.*--hub \([^ ]*\).*/\1/p')
+    [ -z "$HUB_URL" ] && HUB_URL=$(printf '%s' "$JOIN_LINE" | sed -n 's/.*--host \([^ ]*\).*/\1/p')
     HUB_TOK=$(printf '%s' "$JOIN_LINE" | sed -n 's/.*--token \([^ ]*\).*/\1/p')
     if [ -n "$HUB_URL" ] && [ -n "$HUB_TOK" ]; then
       say "joining the fleet at $HUB_URL"
