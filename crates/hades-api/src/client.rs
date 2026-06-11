@@ -129,6 +129,69 @@ impl DaemonClient {
         .await
     }
 
+    /// Deploy with a streamed NDJSON response (build logs + a final
+    /// {"result"|"error"} line). The streaming keeps the connection alive
+    /// through a multi-minute build, so a remote build doesn't hit the ~100s
+    /// tunnel-edge timeout. Used for spreads to a device.
+    pub async fn deploy_streamed(
+        &self,
+        spec: &AppSpec,
+        context_tar_gz: Option<Vec<u8>>,
+        device: Option<&str>,
+    ) -> Result<DeployResponse, ApiError> {
+        let mut form = multipart::Form::new().text(
+            "spec",
+            serde_json::to_string(spec).expect("spec serializes"),
+        );
+        if let Some(bytes) = context_tar_gz {
+            form = form.part(
+                "context",
+                multipart::Part::bytes(bytes)
+                    .file_name("context.tar.gz")
+                    .mime_str("application/gzip")
+                    .expect("static mime"),
+            );
+        }
+        let dev = device.unwrap_or("");
+        let url = format!("{}/apps?stream=true&device={dev}", self.base);
+        let resp = self
+            .auth(self.http.post(url))
+            .multipart(form)
+            .timeout(std::time::Duration::from_secs(900))
+            .send()
+            .await
+            .map_err(|e| ApiError::from(HadesError::DaemonUnreachable(e.to_string())))?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(serde_json::from_str::<ErrorBody>(&body)
+                .map(ApiError::from)
+                .unwrap_or_else(|_| ApiError::from(HadesError::Other(body))));
+        }
+        // the body streams while the build runs; reading it to completion waits
+        // for the final result line
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| ApiError::from(HadesError::Other(e.to_string())))?;
+        for line in text.lines().rev() {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            if let Some(r) = v.get("result") {
+                return serde_json::from_value::<DeployResponse>(r.clone())
+                    .map_err(|e| ApiError::from(HadesError::Other(e.to_string())));
+            }
+            if let Some(e) = v.get("error") {
+                return Err(serde_json::from_value::<ErrorBody>(e.clone())
+                    .map(ApiError::from)
+                    .unwrap_or_else(|_| ApiError::from(HadesError::Other(e.to_string()))));
+            }
+        }
+        Err(ApiError::from(HadesError::Other(
+            "deploy stream ended without a result".into(),
+        )))
+    }
+
     pub async fn join(&self, req: &JoinRequest) -> Result<FleetView, ApiError> {
         Self::check(
             self.auth(self.http.post(format!("{}/fleet/devices", self.base)))

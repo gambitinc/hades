@@ -136,6 +136,10 @@ async fn health(State(d): State<D>) -> Json<HealthResponse> {
 struct DeployQuery {
     #[serde(default)]
     device: Option<String>,
+    /// Stream build progress as NDJSON (keeps the connection alive through a
+    /// long build so a remote spread doesn't hit the tunnel-edge timeout).
+    #[serde(default)]
+    stream: bool,
 }
 
 async fn deploy(
@@ -183,13 +187,71 @@ async fn deploy(
         );
     };
 
-    match d.deploy(spec, context, q.device).await {
+    if q.stream {
+        return deploy_streamed(d, spec, context, q.device);
+    }
+    match d.deploy(spec, context, q.device, None).await {
         Ok(resp) => Json(resp).into_response(),
         Err((e, ledger)) => err_response(
             &e,
             ledger.map(|l| serde_json::to_value(l).expect("ledger serializes")),
         ),
     }
+}
+
+/// Run a deploy while streaming NDJSON progress: `{"log":…}` lines during the
+/// build (plus a 15s heartbeat so a quiet build still keeps the connection
+/// alive), then a final `{"result":…}` or `{"error":…}` line.
+fn deploy_streamed(
+    d: D,
+    spec: AppSpec,
+    context: Option<Vec<u8>>,
+    device: Option<String>,
+) -> Response {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let d2 = d.clone();
+    tokio::spawn(async move {
+        let result = d2.deploy(spec, context, device, Some(tx.clone())).await;
+        let final_json = match result {
+            Ok(resp) => serde_json::json!({ "result": resp }),
+            Err((e, ledger)) => {
+                let eb = match ledger.map(|l| serde_json::to_value(l).expect("ledger serializes")) {
+                    Some(detail) => ErrorBody::with_detail(&e, detail),
+                    None => ErrorBody::new(&e),
+                };
+                serde_json::json!({ "error": eb })
+            }
+        };
+        // a record-separator byte marks the terminal line
+        let _ = tx.send(format!("\u{1e}{final_json}"));
+    });
+
+    let stream = async_stream::stream! {
+        let mut hb = tokio::time::interval(std::time::Duration::from_secs(15));
+        hb.tick().await; // first tick is immediate; skip it
+        loop {
+            tokio::select! {
+                _ = hb.tick() => {
+                    yield Ok::<_, std::io::Error>(axum::body::Bytes::from("{\"log\":\"…\"}\n"));
+                }
+                msg = rx.recv() => match msg {
+                    Some(line) if line.starts_with('\u{1e}') => {
+                        yield Ok(axum::body::Bytes::from(line[1..].to_string() + "\n"));
+                        break;
+                    }
+                    Some(line) => {
+                        let j = serde_json::json!({ "log": line }).to_string();
+                        yield Ok(axum::body::Bytes::from(j + "\n"));
+                    }
+                    None => break,
+                }
+            }
+        }
+    };
+    Response::builder()
+        .header("content-type", "application/x-ndjson")
+        .body(Body::from_stream(stream))
+        .unwrap()
 }
 
 async fn list_apps(State(d): State<D>) -> Json<Vec<AppInfo>> {
@@ -873,12 +935,28 @@ struct SpreadBody {
     device: String,
 }
 
-/// Run another instance of a hub-hosted app on a fleet device.
+/// Run another instance of a hub-hosted app on a fleet device (`all` = every
+/// healthy device).
 async fn app_spread(
     State(d): State<D>,
     Path(name): Path<String>,
     Json(b): Json<SpreadBody>,
 ) -> Response {
+    if b.device == "all" {
+        let view = d.fleet_view().await;
+        let mut spread_to = Vec::new();
+        let mut errors = Vec::new();
+        for dev in view.devices.iter().filter(|x| !x.is_self && x.healthy) {
+            match d.spread(&name, &dev.name).await {
+                Ok(()) => spread_to.push(dev.name.clone()),
+                Err(e) => errors.push(format!("{}: {e}", dev.name)),
+            }
+        }
+        return Json(serde_json::json!({
+            "app": name, "spread_to": spread_to, "errors": errors,
+        }))
+        .into_response();
+    }
     match d.spread(&name, &b.device).await {
         Ok(()) => Json(serde_json::json!({ "app": name, "spread_to": b.device })).into_response(),
         Err(e) => err_response(&e, None),

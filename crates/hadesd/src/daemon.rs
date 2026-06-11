@@ -165,6 +165,7 @@ impl Daemon {
         spec: AppSpec,
         context_tar_gz: Option<Vec<u8>>,
         device: Option<String>,
+        progress: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     ) -> Result<DeployResponse, (HadesError, Option<ResourceLedger>)> {
         spec.validate().map_err(|e| (e, None))?;
 
@@ -239,7 +240,10 @@ impl Daemon {
             })?;
             self.runtime
                 .build_image(&spec.name, &build.dockerfile, &tar, |line| {
-                    tracing::info!(app = %spec.name, "build: {line}")
+                    tracing::info!(app = %spec.name, "build: {line}");
+                    if let Some(tx) = &progress {
+                        let _ = tx.send(line.to_string());
+                    }
                 })
                 .await
                 .map_err(|e| (e, None))?
@@ -811,7 +815,7 @@ impl Daemon {
             None
         };
         client
-            .deploy(&rec.spec, context, Some("local"))
+            .deploy_streamed(&rec.spec, context, Some("local"))
             .await
             .map_err(|e| e.error)?;
 
