@@ -589,6 +589,32 @@ fn local_events(d: &D, n: usize) -> Vec<serde_json::Value> {
 }
 
 async fn dashboard_metrics(State(d): State<D>) -> Response {
+    // A device has no fleet registry of its own, so mirror the hub's dashboard:
+    // pulling it up on any machine shows the same whole-fleet view. Falls
+    // through to the local view if the hub is unreachable.
+    if let (Some(hub), Some(hub_tok)) = (
+        d.config.fleet.hub_url.clone(),
+        d.config.fleet.hub_token.clone(),
+    ) {
+        if let Ok(r) = d
+            .http
+            .get(format!("{}/dashboard/metrics", hub.trim_end_matches('/')))
+            .bearer_auth(hub_tok)
+            .timeout(std::time::Duration::from_secs(8))
+            .send()
+            .await
+        {
+            if r.status().is_success() {
+                if let Ok(body) = r.bytes().await {
+                    return Response::builder()
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap();
+                }
+            }
+        }
+    }
+
     let ledger = d.resource_ledger().await.ok();
     let (req_total, byte_total, inflight) = d.proxy_metrics.snapshot();
 
