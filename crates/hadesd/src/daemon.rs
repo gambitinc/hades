@@ -20,6 +20,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::state::{AppRecord, ReplicaRecord, Store};
 
+/// Reserved claims-map key for a host's stable control hostname (its API
+/// served over a named tunnel). Never a real app name.
+pub const CONTROL_CLAIM_KEY: &str = "__control";
+
 pub struct Daemon {
     pub config: HadesConfig,
     pub paths: HadesPaths,
@@ -865,6 +869,96 @@ impl Daemon {
             self.install_routes(&rec);
         }
         Ok(targets)
+    }
+
+    // ----- stable control URL (named tunnel via the coordinator) -----
+
+    /// Claim a stable control hostname for THIS host and serve its API over a
+    /// named tunnel. Uses this host's own coordinator credentials.
+    pub async fn control_claim(
+        self: &std::sync::Arc<Self>,
+        name: &str,
+    ) -> Result<String, HadesError> {
+        let coord = self.config.domain.coordinator_url.clone().ok_or_else(|| {
+            HadesError::Other(
+                "no coordinator configured; set domain.coordinator_url (ask your operator)".into(),
+            )
+        })?;
+        let secret = self.config.domain.coordinator_secret.clone();
+        let (hostname, token) = self
+            .mint_control_hostname(&coord, secret.as_deref(), name, self.config.api_port)
+            .await?;
+        let record = crate::state::ClaimRecord {
+            app: CONTROL_CLAIM_KEY.to_string(),
+            name: name.to_string(),
+            hostname: hostname.clone(),
+            connector_token: token,
+        };
+        self.install_control_claim(record);
+        Ok(hostname)
+    }
+
+    /// Ask the coordinator to mint `<name>.<domain>` whose tunnel ingress
+    /// points at `api_port` on whichever machine runs the connector. Returns
+    /// (hostname, connector_token). The hub also uses this to mint control
+    /// hostnames on a device's behalf.
+    pub async fn mint_control_hostname(
+        &self,
+        coord: &str,
+        secret: Option<&str>,
+        name: &str,
+        api_port: u16,
+    ) -> Result<(String, String), HadesError> {
+        let proxy_url = format!("http://localhost:{api_port}");
+        let mut req = self
+            .http
+            .post(format!("{}/claim", coord.trim_end_matches('/')))
+            .json(&serde_json::json!({ "name": name, "proxy_url": proxy_url }));
+        if let Some(s) = secret {
+            req = req.header("x-hades-secret", s);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| HadesError::Other(format!("coordinator unreachable: {e}")))?;
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(HadesError::Other(format!("control claim refused: {body}")));
+        }
+        let v: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| HadesError::Other(e.to_string()))?;
+        let hostname = v["hostname"].as_str().unwrap_or_default().to_string();
+        let token = v["connector_token"].as_str().unwrap_or_default().to_string();
+        if hostname.is_empty() || token.is_empty() {
+            return Err(HadesError::Other(
+                "coordinator returned an incomplete control claim".into(),
+            ));
+        }
+        Ok((hostname, token))
+    }
+
+    /// Persist a control claim, run its named tunnel, and adopt its hostname as
+    /// this host's stable control URL. Reused by both the self-claim path and
+    /// a device adopting a hub-minted hostname.
+    pub fn install_control_claim(self: &std::sync::Arc<Self>, record: crate::state::ClaimRecord) {
+        let hostname = record.hostname.clone();
+        self.store.update_claims(|c| {
+            c.insert(CONTROL_CLAIM_KEY.to_string(), record.clone());
+        });
+        self.spawn_claim_tunnel(&record);
+        *self.control_url.lock().unwrap() = Some(format!("https://{hostname}"));
+        self.emit(HostEvent::UrlChanged {
+            app: CONTROL_CLAIM_KEY.into(),
+            old: None,
+            new: format!("https://{hostname}"),
+        });
+    }
+
+    /// The stable control claim, if this host has one.
+    pub fn control_claim_record(&self) -> Option<crate::state::ClaimRecord> {
+        self.store.claim_for(CONTROL_CLAIM_KEY)
     }
 
     /// Under sustained memory pressure, move one app off this machine: spread

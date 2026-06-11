@@ -199,6 +199,13 @@ enum HostCmd {
     /// Print the command another machine runs to control this host
     /// (control-tunnel URL + bearer token). Treat it like a password.
     ConnectInfo,
+    /// Give this host a STABLE control URL (a named tunnel at
+    /// <name>.<domain>) so it stays reachable across restarts instead of
+    /// rotating a quick tunnel. Run on the hub, then on each device.
+    Stabilize {
+        /// Subdomain label (default: this machine's short hostname).
+        name: Option<String>,
+    },
     /// (operator) Put this host on a domain you own via a named tunnel:
     /// apps at https://<app>.<domain>, API at https://api.<domain>.
     /// Requires `cloudflared tunnel login` first.
@@ -725,6 +732,7 @@ async fn host_cmd(cmd: HostCmd, json: bool) -> ExitCode {
                 Err(e) => fail(e, json),
             }
         }
+        HostCmd::Stabilize { name } => stabilize_cmd(name, json).await,
         HostCmd::Join { hub, token, name } => {
             // this device must be up with a control tunnel before it can join
             let local = DaemonClient::for_host(
@@ -1228,6 +1236,89 @@ async fn fleet_cmd(cmd: FleetCmd, json: bool) -> ExitCode {
             }
             Err(e) => fail(e, json),
         },
+    }
+}
+
+/// This machine's short hostname as a DNS-safe subdomain label.
+fn host_label() -> String {
+    let raw = std::process::Command::new("hostname")
+        .arg("-s")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "host".into());
+    let label: String = raw
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    label.trim_matches('-').to_string()
+}
+
+async fn stabilize_cmd(name: Option<String>, json: bool) -> ExitCode {
+    let paths = HadesPaths::new();
+    let config = HadesConfig::load_or_default(&paths.config());
+    let label = name.unwrap_or_else(host_label);
+    let local = client();
+
+    if config.domain.coordinator_url.is_some() {
+        // hub: the local daemon mints + installs via its own coordinator
+        eprintln!("claiming a stable control URL for {label}…");
+        match local.host_stabilize(&label).await {
+            Ok(v) => {
+                let url = v["control_url"].as_str().unwrap_or_default();
+                if json {
+                    render::json(&v);
+                } else {
+                    println!();
+                    println!("  ⚓ this host's control URL is now stable:");
+                    println!("     {url}");
+                    println!();
+                    println!("  it survives restarts and never rotates. point devices at it:");
+                    println!("     hades host join --hub {url} --token <this host's token>");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e.error, json),
+        }
+    } else if let Some(hub) = config.fleet.hub_url.clone() {
+        // device: ask the hub to mint a hostname, then adopt it locally
+        eprintln!("asking the hub to mint a stable control URL…");
+        let hub_client = DaemonClient::for_host(&hub, config.fleet.hub_token.clone());
+        let minted = match hub_client.fleet_control_token(&label, config.api_port).await {
+            Ok(v) => v,
+            Err(e) => return fail(e.error, json),
+        };
+        let hostname = minted["hostname"].as_str().unwrap_or_default().to_string();
+        let token = minted["connector_token"].as_str().unwrap_or_default().to_string();
+        if hostname.is_empty() || token.is_empty() {
+            return fail(
+                HadesError::Other("the hub returned an incomplete control claim".into()),
+                json,
+            );
+        }
+        match local.host_adopt_control(&label, &hostname, &token).await {
+            Ok(v) => {
+                if json {
+                    render::json(&v);
+                } else {
+                    println!();
+                    println!("  ⚓ this device now has a stable control URL:");
+                    println!("     https://{hostname}");
+                    println!();
+                    println!("  it re-registers with the hub automatically and won't rotate again.");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => fail(e.error, json),
+        }
+    } else {
+        fail(
+            HadesError::Other(
+                "nothing to stabilize against: this host has no coordinator and hasn't joined a hub".into(),
+            ),
+            json,
+        )
     }
 }
 

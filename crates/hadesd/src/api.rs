@@ -99,6 +99,9 @@ pub fn router(d: D) -> Router {
         .route("/host/ps", get(ps))
         .route("/host/src", get(host_src))
         .route("/host/update", post(host_update))
+        .route("/host/stabilize", post(host_stabilize))
+        .route("/host/adopt-control", post(host_adopt_control))
+        .route("/fleet/control-token", post(fleet_control_token))
         .route("/host/ssh", post(host_ssh))
         .route("/dashboard/metrics", get(dashboard_metrics))
         .route("/domain/claim", post(domain_claim))
@@ -384,6 +387,80 @@ async fn host_update(State(d): State<D>) -> Response {
     }
 }
 
+#[derive(Deserialize)]
+struct StabilizeBody {
+    name: String,
+}
+
+/// Claim a stable control hostname for THIS host (uses its own coordinator).
+async fn host_stabilize(State(d): State<D>, Json(b): Json<StabilizeBody>) -> Response {
+    match d.control_claim(&b.name).await {
+        Ok(hostname) => Json(serde_json::json!({
+            "hostname": hostname,
+            "control_url": format!("https://{hostname}"),
+        }))
+        .into_response(),
+        Err(e) => err_response(&e, None),
+    }
+}
+
+#[derive(Deserialize)]
+struct ControlTokenBody {
+    name: String,
+    #[serde(default = "default_api_port")]
+    api_port: u16,
+}
+fn default_api_port() -> u16 {
+    8786
+}
+
+/// Hub side: mint a stable control hostname for a device using the hub's
+/// coordinator, and hand back the connector token the device runs locally.
+async fn fleet_control_token(State(d): State<D>, Json(b): Json<ControlTokenBody>) -> Response {
+    let Some(coord) = d.config.domain.coordinator_url.clone() else {
+        return err_response(
+            &HadesError::Other("this hub has no coordinator configured".into()),
+            None,
+        );
+    };
+    let secret = d.config.domain.coordinator_secret.clone();
+    match d
+        .mint_control_hostname(&coord, secret.as_deref(), &b.name, b.api_port)
+        .await
+    {
+        Ok((hostname, token)) => Json(serde_json::json!({
+            "hostname": hostname,
+            "connector_token": token,
+        }))
+        .into_response(),
+        Err(e) => err_response(&e, None),
+    }
+}
+
+#[derive(Deserialize)]
+struct AdoptControlBody {
+    name: String,
+    hostname: String,
+    connector_token: String,
+}
+
+/// Device side: adopt a hub-minted control hostname (run its named tunnel and
+/// serve the API over it as this host's stable control URL).
+async fn host_adopt_control(State(d): State<D>, Json(b): Json<AdoptControlBody>) -> Response {
+    let record = crate::state::ClaimRecord {
+        app: crate::daemon::CONTROL_CLAIM_KEY.to_string(),
+        name: b.name,
+        hostname: b.hostname.clone(),
+        connector_token: b.connector_token,
+    };
+    d.install_control_claim(record);
+    Json(serde_json::json!({
+        "hostname": b.hostname,
+        "control_url": format!("https://{}", b.hostname),
+    }))
+    .into_response()
+}
+
 /// Fan a self-update out to every joined device: the hub holds their
 /// tokens, each device pulls source back from this hub and rebuilds.
 async fn fleet_update(State(d): State<D>) -> Response {
@@ -462,6 +539,7 @@ async fn domain_claims(State(d): State<D>) -> Json<hades_api::types::DomainClaim
         .store
         .claims_snapshot()
         .into_values()
+        .filter(|c| c.app != crate::daemon::CONTROL_CLAIM_KEY)
         .map(|c| hades_api::types::DomainClaim {
             app: c.app,
             name: c.name,

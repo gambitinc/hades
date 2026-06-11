@@ -319,6 +319,38 @@ async fn main() {
     // --- reconcile persisted state, then emit startup events ---
     d.reconcile_all().await;
     watchdog::reap(&d).await;
+
+    // a stable control claim (named tunnel) wins over the rotating quick
+    // tunnel: reconcile already respawned its connector, so just adopt the URL
+    let has_control_claim = d.control_claim_record().is_some();
+    if let Some(c) = d.control_claim_record() {
+        *d.control_url.lock().unwrap() = Some(format!("https://{}", c.hostname));
+        tracing::info!("stable control URL: https://{}", c.hostname);
+    }
+    // a device with a stable control URL registers it with the hub once on
+    // boot; it never rotates, so there's no re-register churn after this
+    if has_control_claim {
+        let url = d.control_url.lock().unwrap().clone();
+        if let (Some(hub), Some(hub_tok), Some(own_tok), Some(url)) = (
+            d.config.fleet.hub_url.clone(),
+            d.config.fleet.hub_token.clone(),
+            d.config.auth_token.clone(),
+            url,
+        ) {
+            let req = hades_api::types::JoinRequest {
+                name: short_hostname(),
+                control_url: url,
+                token: own_tok,
+            };
+            match hades_api::DaemonClient::for_host(&hub, Some(hub_tok))
+                .join(&req)
+                .await
+            {
+                Ok(_) => tracing::info!("registered stable control URL with hub {hub}"),
+                Err(e) => tracing::warn!("hub register failed: {}", e.error),
+            }
+        }
+    }
     for ev in startup_events {
         d.emit(ev);
     }
@@ -448,8 +480,9 @@ async fn main() {
 
     // control tunnel: the daemon's own API, publicly reachable (auth'd),
     // so `hades login --host <url> --token <t>` works from another machine.
-    // Skipped in domain mode — api.<domain> already serves the control API.
-    if !domain_mode && d.provider.is_some() {
+    // Skipped in domain mode (api.<domain> serves it) or when a stable control
+    // claim exists (its named tunnel is already up, and it never rotates).
+    if !domain_mode && !has_control_claim && d.provider.is_some() {
         let d2 = d.clone();
         tokio::spawn(async move {
             while let Some(provider) = d2.provider.as_ref() {

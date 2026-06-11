@@ -381,6 +381,55 @@ impl DaemonClient {
         .await
     }
 
+    /// Claim a stable control hostname for this host (its own coordinator).
+    pub async fn host_stabilize(&self, name: &str) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/host/stabilize", self.base)))
+                .json(&serde_json::json!({ "name": name }))
+                .timeout(std::time::Duration::from_secs(60))
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    /// Hub side: mint a stable control hostname + connector token for a device.
+    pub async fn fleet_control_token(
+        &self,
+        name: &str,
+        api_port: u16,
+    ) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/fleet/control-token", self.base)))
+                .json(&serde_json::json!({ "name": name, "api_port": api_port }))
+                .timeout(std::time::Duration::from_secs(60))
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    /// Device side: adopt a hub-minted control hostname locally.
+    pub async fn host_adopt_control(
+        &self,
+        name: &str,
+        hostname: &str,
+        connector_token: &str,
+    ) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/host/adopt-control", self.base)))
+                .json(&serde_json::json!({
+                    "name": name,
+                    "hostname": hostname,
+                    "connector_token": connector_token,
+                }))
+                .timeout(std::time::Duration::from_secs(60))
+                .send()
+                .await,
+        )
+        .await
+    }
+
     /// Ask a host to update itself (detached; it rebuilds and restarts).
     pub async fn trigger_update(&self) -> Result<serde_json::Value, ApiError> {
         Self::check(
