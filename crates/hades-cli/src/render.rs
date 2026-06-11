@@ -201,7 +201,7 @@ pub fn ps(p: &PsReport) {
 pub fn fleet(v: &FleetView) {
     println!(
         "{:<22} {:<8} {:>9} {:>9} {:>9} {:<6} LAST SEEN",
-        "MACHINE", "HEALTH", "LOAD", "EST CAP", "FREE", "APPS"
+        "MACHINE", "HEALTH", "LOAD", "MAX R/S", "FREE", "APPS"
     );
     for d in &v.devices {
         let name = if d.is_self {

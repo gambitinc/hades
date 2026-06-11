@@ -24,11 +24,15 @@ use crate::state::{AppRecord, ReplicaRecord, Store};
 /// served over a named tunnel). Never a real app name.
 pub const CONTROL_CLAIM_KEY: &str = "__control";
 
-/// A host's estimated serving ceiling and the inputs behind it.
+/// A host's serving ceilings and the inputs behind them.
 pub struct CapacityEstimate {
-    /// Estimated max requests/sec; None until upstream bandwidth is probed.
-    pub req_per_sec: Option<f64>,
-    pub cpu_bound: bool,
+    /// Maximum requests/sec the machine can process — a request-rate ceiling
+    /// (CPU/proxy bound), independent of payload. This is "max possible".
+    pub max_req_per_sec: f64,
+    /// Requests/sec the uplink can actually sustain at the current average
+    /// response size (bytes/sec ÷ avg response). None until bandwidth probed.
+    /// Usually the binding constraint for real pages.
+    pub sustained_req_per_sec: Option<f64>,
     pub upload_mbps: Option<f64>,
     pub avg_response_kb: f64,
     pub cpu_cores: usize,
@@ -91,15 +95,14 @@ impl Daemon {
         let cores = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4);
-        let cpu_cap = cores as f64 * 8000.0;
-        let net_cap = upload_mbps.map(|m| (m * 1_000_000.0 / 8.0) / avg_resp);
-        let (req_per_sec, cpu_bound) = match net_cap {
-            Some(n) => (Some(n.min(cpu_cap)), cpu_cap < n),
-            None => (None, false),
-        };
+        // max possible = request-rate ceiling (payload-independent)
+        let max_req_per_sec = cores as f64 * 8000.0;
+        // what the uplink actually sustains at the current average page size
+        let sustained_req_per_sec =
+            upload_mbps.map(|m| ((m * 1_000_000.0 / 8.0) / avg_resp).min(max_req_per_sec));
         CapacityEstimate {
-            req_per_sec,
-            cpu_bound,
+            max_req_per_sec,
+            sustained_req_per_sec,
             upload_mbps,
             avg_response_kb: avg_resp / 1024.0,
             cpu_cores: cores,

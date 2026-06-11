@@ -106,7 +106,7 @@ impl Daemon {
             added_at: self.started_at,
             is_self: true,
             req_per_sec: *self.req_per_sec.lock().unwrap(),
-            capacity_req_per_sec: self.capacity_estimate().req_per_sec,
+            capacity_req_per_sec: Some(self.capacity_estimate().max_req_per_sec),
         }];
 
         for d in &fleet.devices {

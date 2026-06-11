@@ -680,11 +680,11 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
     let ledger = d.resource_ledger().await.ok();
     let (req_total, _byte_total, inflight) = d.proxy_metrics.snapshot();
 
-    // this machine's estimated serving ceiling (the fleet total is the sum of
-    // every machine's, computed below)
+    // this machine's serving ceilings (the fleet max is the sum of every
+    // machine's, computed below)
     let est = d.capacity_estimate();
-    let capacity = est.req_per_sec;
-    let cpu_bound = est.cpu_bound;
+    let max_req_per_sec = est.max_req_per_sec;
+    let sustained = est.sustained_req_per_sec;
     let upload_mbps = est.upload_mbps;
     let avg_response_kb = est.avg_response_kb;
     let cores = est.cpu_cores;
@@ -804,8 +804,8 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
             "apps": d.store.snapshot().len(),
         },
         "capacity": {
-            "req_per_sec": capacity,
-            "cpu_bound": cpu_bound,
+            "max_req_per_sec": max_req_per_sec,
+            "sustained_req_per_sec": sustained,
             "upload_mbps": upload_mbps,
             "avg_response_kb": avg_response_kb,
             "cpu_cores": cores,
@@ -1173,7 +1173,7 @@ async fn host_status(State(d): State<D>) -> Response {
         },
         availability_pct_7d: Some(d.ledger.availability_pct(week_ago)),
         req_per_sec: *d.req_per_sec.lock().unwrap(),
-        capacity_req_per_sec: d.capacity_estimate().req_per_sec,
+        capacity_req_per_sec: Some(d.capacity_estimate().max_req_per_sec),
         apps,
     })
     .into_response()
