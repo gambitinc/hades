@@ -26,13 +26,16 @@ pub const CONTROL_CLAIM_KEY: &str = "__control";
 
 /// A host's serving ceilings and the inputs behind them.
 pub struct CapacityEstimate {
-    /// Maximum requests/sec the machine can process — a request-rate ceiling
-    /// (CPU/proxy bound), independent of payload. This is "max possible".
-    pub max_req_per_sec: f64,
-    /// Requests/sec the uplink can actually sustain at the current average
-    /// response size (bytes/sec ÷ avg response). None until bandwidth probed.
-    /// Usually the binding constraint for real pages.
-    pub sustained_req_per_sec: Option<f64>,
+    /// Realistic max requests/sec: the lower of the machine's request-rate
+    /// ceiling and what the uplink sustains at the current page size. This is
+    /// the headline "max req/sec" (internet included).
+    pub effective_req_per_sec: f64,
+    /// What the machine alone could process — a request-rate ceiling
+    /// (CPU/proxy bound), independent of payload.
+    pub machine_req_per_sec: f64,
+    /// What the uplink sustains at the current average response size
+    /// (bytes/sec ÷ avg response). None until bandwidth is probed.
+    pub network_req_per_sec: Option<f64>,
     pub upload_mbps: Option<f64>,
     pub avg_response_kb: f64,
     pub cpu_cores: usize,
@@ -95,14 +98,18 @@ impl Daemon {
         let cores = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(4);
-        // max possible = request-rate ceiling (payload-independent)
-        let max_req_per_sec = cores as f64 * 8000.0;
-        // what the uplink actually sustains at the current average page size
-        let sustained_req_per_sec =
-            upload_mbps.map(|m| ((m * 1_000_000.0 / 8.0) / avg_resp).min(max_req_per_sec));
+        // the machine's raw request-rate ceiling (payload-independent)
+        let machine_req_per_sec = cores as f64 * 8000.0;
+        // what the uplink sustains at the current average page size
+        let network_req_per_sec = upload_mbps.map(|m| (m * 1_000_000.0 / 8.0) / avg_resp);
+        // realistic max = the lower of the two (internet usually wins)
+        let effective_req_per_sec = network_req_per_sec
+            .map(|n| n.min(machine_req_per_sec))
+            .unwrap_or(machine_req_per_sec);
         CapacityEstimate {
-            max_req_per_sec,
-            sustained_req_per_sec,
+            effective_req_per_sec,
+            machine_req_per_sec,
+            network_req_per_sec,
             upload_mbps,
             avg_response_kb: avg_resp / 1024.0,
             cpu_cores: cores,

@@ -112,6 +112,7 @@ pub fn router(d: D) -> Router {
         .route("/fleet/devices", post(fleet_join))
         .route("/fleet/devices/{name}", delete(fleet_remove))
         .route("/fleet/update", post(fleet_update))
+        .route("/test", post(run_test))
         .route("/apps/{name}/spread", post(app_spread))
         .route("/apps/{name}/spread/{device}", delete(app_gather))
         .route("/_relay/{*path}", any(relay))
@@ -680,11 +681,12 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
     let ledger = d.resource_ledger().await.ok();
     let (req_total, _byte_total, inflight) = d.proxy_metrics.snapshot();
 
-    // this machine's serving ceilings (the fleet max is the sum of every
+    // this machine's serving ceilings (the fleet total is the sum of every
     // machine's, computed below)
     let est = d.capacity_estimate();
-    let max_req_per_sec = est.max_req_per_sec;
-    let sustained = est.sustained_req_per_sec;
+    let effective_req_per_sec = est.effective_req_per_sec;
+    let machine_req_per_sec = est.machine_req_per_sec;
+    let network_req_per_sec = est.network_req_per_sec;
     let upload_mbps = est.upload_mbps;
     let avg_response_kb = est.avg_response_kb;
     let cores = est.cpu_cores;
@@ -704,6 +706,7 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
     let mut healthy_count = 0u32;
     let mut fleet_req_per_sec = 0f64;
     let mut fleet_capacity = 0f64;
+    let mut fleet_machine = 0f64;
     let devices: Vec<serde_json::Value> = fleet
         .devices
         .iter()
@@ -713,6 +716,7 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
             }
             fleet_req_per_sec += dev.req_per_sec;
             fleet_capacity += dev.capacity_req_per_sec.unwrap_or(0.0);
+            fleet_machine += dev.machine_req_per_sec.unwrap_or(0.0);
             serde_json::json!({
                 "name": dev.name,
                 "is_self": dev.is_self,
@@ -721,6 +725,7 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
                 "apps": dev.apps,
                 "load": dev.req_per_sec,
                 "capacity": dev.capacity_req_per_sec,
+                "machine": dev.machine_req_per_sec,
                 "last_seen": if dev.is_self {
                     "now".to_string()
                 } else {
@@ -804,8 +809,9 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
             "apps": d.store.snapshot().len(),
         },
         "capacity": {
-            "max_req_per_sec": max_req_per_sec,
-            "sustained_req_per_sec": sustained,
+            "max_req_per_sec": effective_req_per_sec,
+            "machine_req_per_sec": machine_req_per_sec,
+            "network_req_per_sec": network_req_per_sec,
             "upload_mbps": upload_mbps,
             "avg_response_kb": avg_response_kb,
             "cpu_cores": cores,
@@ -818,6 +824,7 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
             "healthy": healthy_count,
             "req_per_sec": fleet_req_per_sec,
             "capacity_req_per_sec": fleet_capacity,
+            "machine_req_per_sec": fleet_machine,
             "devices": devices,
         },
         "apps": app_rows,
@@ -905,6 +912,18 @@ async fn fleet_join(
     fleet::poll_one(&d, &req.name).await;
     tracing::info!(device = %req.name, "fleet: device joined");
     Json(d.fleet_view().await).into_response()
+}
+
+#[derive(Deserialize)]
+struct TestQuery {
+    /// "fleet" (default), "local" (the hub), or a device name.
+    #[serde(default)]
+    scope: Option<String>,
+}
+
+async fn run_test(State(d): State<D>, Query(q): Query<TestQuery>) -> Response {
+    let scope = q.scope.unwrap_or_else(|| "fleet".into());
+    Json(crate::test::run(&d, &scope).await).into_response()
 }
 
 async fn fleet_list(State(d): State<D>) -> Json<hades_api::types::FleetView> {
@@ -1173,7 +1192,9 @@ async fn host_status(State(d): State<D>) -> Response {
         },
         availability_pct_7d: Some(d.ledger.availability_pct(week_ago)),
         req_per_sec: *d.req_per_sec.lock().unwrap(),
-        capacity_req_per_sec: Some(d.capacity_estimate().max_req_per_sec),
+        capacity_req_per_sec: Some(d.capacity_estimate().effective_req_per_sec),
+        machine_req_per_sec: Some(d.capacity_estimate().machine_req_per_sec),
+        total_served: d.proxy_metrics.snapshot().0,
         apps,
     })
     .into_response()

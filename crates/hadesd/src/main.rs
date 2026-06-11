@@ -10,6 +10,7 @@ mod power;
 mod reports;
 mod secrets;
 mod state;
+mod test;
 mod watchdog;
 
 use std::io::Write;

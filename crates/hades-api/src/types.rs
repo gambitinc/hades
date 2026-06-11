@@ -118,10 +118,16 @@ pub struct HostStatus {
     /// relayed-in load), sampled once a second.
     #[serde(default)]
     pub req_per_sec: f64,
-    /// Estimated max requests/sec this host can serve (None until bandwidth is
-    /// probed).
+    /// Realistic max requests/sec (lower of machine ceiling and uplink).
     #[serde(default)]
     pub capacity_req_per_sec: Option<f64>,
+    /// What the machine alone could process (request-rate ceiling).
+    #[serde(default)]
+    pub machine_req_per_sec: Option<f64>,
+    /// Total requests this host's proxy has served (cumulative) — used to
+    /// measure the per-machine split in `hades test`.
+    #[serde(default)]
+    pub total_served: u64,
     pub apps: Vec<AppInfo>,
 }
 
@@ -219,9 +225,15 @@ pub struct FleetDeviceView {
     /// Live requests/sec this machine is serving.
     #[serde(default)]
     pub req_per_sec: f64,
-    /// Estimated max requests/sec this machine can serve.
+    /// Realistic max requests/sec (machine ceiling capped by uplink).
     #[serde(default)]
     pub capacity_req_per_sec: Option<f64>,
+    /// What the machine alone could process (request-rate ceiling).
+    #[serde(default)]
+    pub machine_req_per_sec: Option<f64>,
+    /// Total requests this machine's proxy has served (cumulative).
+    #[serde(default)]
+    pub total_served: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,6 +275,26 @@ pub struct DomainClaim {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainClaimList {
     pub claims: Vec<DomainClaim>,
+}
+
+/// One check in a `hades test` run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestCheck {
+    pub name: String,
+    pub pass: bool,
+    pub detail: String,
+    /// Grouping label (e.g. "uptime", "response", "load balance").
+    #[serde(default)]
+    pub group: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestReport {
+    /// "fleet" or a device name.
+    pub scope: String,
+    pub checks: Vec<TestCheck>,
+    pub passed: usize,
+    pub failed: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

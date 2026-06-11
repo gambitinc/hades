@@ -202,6 +202,17 @@ impl DaemonClient {
         .await
     }
 
+    /// Run the networking self-test (`scope` = "fleet", "local", or a device).
+    pub async fn run_test(&self, scope: &str) -> Result<TestReport, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/test?scope={scope}", self.base)))
+                .timeout(std::time::Duration::from_secs(180))
+                .send()
+                .await,
+        )
+        .await
+    }
+
     pub async fn fleet(&self) -> Result<FleetView, ApiError> {
         Self::check(
             self.auth(self.http.get(format!("{}/fleet", self.base)))

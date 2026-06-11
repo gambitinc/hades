@@ -198,10 +198,30 @@ pub fn ps(p: &PsReport) {
     }
 }
 
+pub fn test_report(r: &TestReport) {
+    println!();
+    println!("  hades test · {}", r.scope);
+    let mut group = String::new();
+    for c in &r.checks {
+        if c.group != group {
+            group = c.group.clone();
+            println!("\n  {}", group.to_uppercase());
+        }
+        let mark = if c.pass { "✓" } else { "✗" };
+        println!("    {mark} {:<26} {}", c.name, c.detail);
+    }
+    println!();
+    if r.failed == 0 {
+        println!("  {} checks passed", r.passed);
+    } else {
+        println!("  {} passed · {} FAILED", r.passed, r.failed);
+    }
+}
+
 pub fn fleet(v: &FleetView) {
     println!(
-        "{:<22} {:<8} {:>9} {:>9} {:>9} {:<6} LAST SEEN",
-        "MACHINE", "HEALTH", "LOAD", "MAX R/S", "FREE", "APPS"
+        "{:<22} {:<7} {:>8} {:>10} {:>10} {:>8} {:<5} LAST SEEN",
+        "MACHINE", "HEALTH", "LOAD", "MAX R/S", "HW MAX", "FREE", "APPS"
     );
     for d in &v.devices {
         let name = if d.is_self {
@@ -209,16 +229,17 @@ pub fn fleet(v: &FleetView) {
         } else {
             d.name.clone()
         };
-        let cap = d
-            .capacity_req_per_sec
-            .map(|c| format!("{} r/s", c.round() as u64))
-            .unwrap_or_else(|| "—".into());
+        let fmt_rps = |o: Option<f64>| {
+            o.map(|c| format!("{} r/s", c.round() as u64))
+                .unwrap_or_else(|| "—".into())
+        };
         println!(
-            "{:<22} {:<8} {:>5} r/s {:>9} {:>7}MB {:<6} {}",
+            "{:<22} {:<7} {:>4} r/s {:>10} {:>10} {:>6}MB {:<5} {}",
             name,
             if d.healthy { "green" } else { "red" },
             d.req_per_sec.round() as u64,
-            cap,
+            fmt_rps(d.capacity_req_per_sec),
+            fmt_rps(d.machine_req_per_sec),
             d.free_mb,
             d.apps,
             if d.is_self {

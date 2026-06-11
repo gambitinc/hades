@@ -119,7 +119,7 @@
   <div class="section" style="margin-bottom:26px">
     <h2>The fleet</h2>
     <table id="fleet-table">
-      <thead><tr><th>machine</th><th>health</th><th class="num">load</th><th class="num">max r/s</th><th class="num">free</th><th class="num">apps</th><th class="num">last seen</th></tr></thead>
+      <thead><tr><th>machine</th><th>health</th><th class="num">load</th><th class="num">max r/s</th><th class="num">machine</th><th class="num">free</th><th class="num">apps</th><th class="num">last seen</th></tr></thead>
       <tbody id="fleet-body"></tbody>
     </table>
   </div>
@@ -168,15 +168,14 @@ async function poll(){
 
   // headline capacity
   const cap = m.capacity;
-  // headline = whole-fleet MAX req/s (sum of every machine's request-rate
-  // ceiling); the sub-line breaks out this machine and the uplink-limited rate
+  // headline = whole-fleet effective max req/s (internet-capped); the sub-line
+  // shows the raw hardware ceiling and how the uplink caps it
   $('capacity').textContent = m.fleet.capacity_req_per_sec == null ? '…' : fmt(m.fleet.capacity_req_per_sec);
-  const sust = cap.sustained_req_per_sec;
   $('capacity-sub').innerHTML =
-    `sum across <b>${m.fleet.count}</b> machine${m.fleet.count===1?'':'s'} · this one <b>${fmt(cap.max_req_per_sec)}</b> r/s max`
-    + (sust == null
+    `across <b>${m.fleet.count}</b> machine${m.fleet.count===1?'':'s'} · hardware can do <b>${fmt(m.fleet.machine_req_per_sec)}</b> r/s`
+    + (cap.network_req_per_sec == null
         ? ' · <span class="muted">measuring uplink…</span>'
-        : ` · <span class="muted">uplink sustains <b>${fmt(sust)}</b>/s at ${cap.avg_response_kb.toFixed(0)}KB pages</span>`);
+        : `, <span class="muted">uplink caps real traffic to <b>${fmt(m.fleet.capacity_req_per_sec)}</b>/s at ${cap.avg_response_kb.toFixed(0)}KB pages</span>`);
 
   // machines
   $('machines').textContent = m.fleet.count;
@@ -215,6 +214,7 @@ async function poll(){
     <td><span class="pill ${d.healthy?'green':'red'}">${d.healthy?'green':'red'}</span></td>
     <td class="num">${fmt(d.load||0)}<span class="muted"> r/s</span></td>
     <td class="num">${d.capacity==null?'—':fmt(d.capacity)+'<span class="muted"> r/s</span>'}</td>
+    <td class="num">${d.machine==null?'—':fmt(d.machine)+'<span class="muted"> r/s</span>'}</td>
     <td class="num">${d.free_mb==null?'—':(d.free_mb/1024).toFixed(1)+'GB'}</td>
     <td class="num">${d.apps==null?'—':d.apps}</td>
     <td class="num">${d.last_seen||'—'}</td></tr>`).join('');

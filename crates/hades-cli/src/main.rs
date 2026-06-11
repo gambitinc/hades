@@ -101,6 +101,16 @@ enum Cmd {
         #[arg(long)]
         to: String,
     },
+    /// Run networking self-tests — uptime, response rate, load balancing —
+    /// on the whole fleet or one machine. Run with no flag to pick.
+    Test {
+        /// Machine to test: "local" (this hub) or a device name.
+        #[arg(long)]
+        device: Option<String>,
+        /// Test the whole fleet (skip the prompt).
+        #[arg(long)]
+        fleet: bool,
+    },
     /// Stop running an app on a spread device and re-home its traffic.
     Gather {
         /// App to gather (default: the Hades.toml here).
@@ -389,6 +399,7 @@ async fn main() -> ExitCode {
         Cmd::Apps { cmd } => apps_cmd(cmd, json).await,
         Cmd::Secrets { cmd } => secrets_cmd(cmd, json).await,
         Cmd::Fleet { cmd } => fleet_cmd(cmd.unwrap_or(FleetCmd::List), json).await,
+        Cmd::Test { device, fleet } => test_cmd(device, fleet, json).await,
         Cmd::Spread { app, to } => spread_cmd(app, to, json).await,
         Cmd::Gather { app, from } => gather_cmd(app, from, json).await,
         Cmd::Url { name } => match client().get_app(&name).await {
@@ -1319,6 +1330,56 @@ async fn stabilize_cmd(name: Option<String>, json: bool) -> ExitCode {
             ),
             json,
         )
+    }
+}
+
+async fn test_cmd(device: Option<String>, fleet: bool, json: bool) -> ExitCode {
+    use std::io::Write;
+    let c = client();
+    let scope = if fleet {
+        "fleet".to_string()
+    } else if let Some(dev) = device {
+        dev
+    } else {
+        // pick: whole fleet, or a specific machine
+        let view = match c.fleet().await {
+            Ok(v) => v,
+            Err(e) => return fail(e.error, json),
+        };
+        println!("what should I test?");
+        println!("  0) the whole fleet");
+        for (i, d) in view.devices.iter().enumerate() {
+            println!("  {}) {}{}", i + 1, d.name, if d.is_self { " (this machine)" } else { "" });
+        }
+        print!("> ");
+        let _ = std::io::stdout().flush();
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        match line.trim().parse::<usize>() {
+            Ok(0) | Err(_) => "fleet".to_string(),
+            Ok(n) => view
+                .devices
+                .get(n - 1)
+                .map(|d| if d.is_self { "local".to_string() } else { d.name.clone() })
+                .unwrap_or_else(|| "fleet".into()),
+        }
+    };
+
+    eprintln!("running networking tests on {scope}…");
+    match c.run_test(&scope).await {
+        Ok(report) => {
+            if json {
+                render::json(&report);
+            } else {
+                render::test_report(&report);
+            }
+            if report.failed == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            }
+        }
+        Err(e) => fail(e.error, json),
     }
 }
 
