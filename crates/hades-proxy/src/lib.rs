@@ -75,17 +75,45 @@ pub struct AppRoute {
     latencies_ms: Mutex<Vec<f64>>,
 }
 
+/// How strongly local backends are favored over remote (relayed) ones when
+/// picking which to serve from. A relay to another fleet machine is a double
+/// internet hop, so it's much slower than a loopback replica; weighting the
+/// local path keeps p95 low while a remote instance still takes a share and
+/// stays warm for failover.
+const LOCAL_WEIGHT: usize = 5;
+
 impl AppRoute {
-    /// The backend set in round-robin order starting at the next index, so a
-    /// caller can try each in turn and fall through a dead one.
+    /// The backends to try, best-first: a weighted round-robin pick leads
+    /// (locals favored `LOCAL_WEIGHT`:1 over remotes), then every other backend
+    /// follows as a failover fallback. So most traffic takes the fast local
+    /// path, a slice still load-balances to remote instances, and a dead pick
+    /// falls through to the next.
     fn backend_order(&self) -> Vec<Backend> {
         let backends = self.backends.read().unwrap();
         let n = backends.len();
         if n == 0 {
             return Vec::new();
         }
-        let start = self.rr.fetch_add(1, Ordering::Relaxed) % n;
-        (0..n).map(|k| backends[(start + k) % n].clone()).collect()
+        // weighted pool of backend indices
+        let mut pool: Vec<usize> = Vec::with_capacity(n * LOCAL_WEIGHT);
+        for (i, b) in backends.iter().enumerate() {
+            let w = match b {
+                Backend::Local(_) => LOCAL_WEIGHT,
+                Backend::Remote { .. } => 1,
+            };
+            for _ in 0..w {
+                pool.push(i);
+            }
+        }
+        let primary = pool[self.rr.fetch_add(1, Ordering::Relaxed) % pool.len()];
+        let mut order = Vec::with_capacity(n);
+        order.push(backends[primary].clone());
+        for (i, b) in backends.iter().enumerate() {
+            if i != primary {
+                order.push(b.clone());
+            }
+        }
+        order
     }
 
     /// A loopback backend for this app, if any (used by the relay handler).
@@ -412,7 +440,9 @@ async fn forward_remote(
         .request(method, url)
         .bearer_auth(token)
         .body(body.clone())
-        .timeout(std::time::Duration::from_secs(25));
+        // bound the relay so a slow/hung remote falls back to a faster backend
+        // (usually the local replica) instead of stalling the visitor
+        .timeout(std::time::Duration::from_secs(8));
     for (name, value) in parts.headers.iter() {
         if !is_hop_header(name.as_str()) && !name.as_str().eq_ignore_ascii_case("authorization") {
             rb = rb.header(name.as_str(), value.as_bytes());
@@ -503,13 +533,15 @@ mod tests {
         assert!(t.add_alias("hello", "rand.trycloudflare.com:443"));
 
         let r = t.lookup("hello.localhost").unwrap();
-        // backend_order starts at the next index each call, so two calls cover
-        // both backends in alternating lead position
-        let first = r.backend_order();
-        let second = r.backend_order();
-        assert_eq!(first.len(), 2);
-        assert_eq!(second.len(), 2);
-        assert_ne!(first[0], second[0]);
+        // every order lists both backends (failover), and across many picks
+        // both lead at least once (round-robin spreads the primary)
+        let mut leads = std::collections::HashSet::new();
+        for _ in 0..20 {
+            let order = r.backend_order();
+            assert_eq!(order.len(), 2);
+            leads.insert(format!("{:?}", order[0]));
+        }
+        assert_eq!(leads.len(), 2, "both backends should lead over many picks");
 
         // alias resolves to the same route
         let via_alias = t.lookup("rand.trycloudflare.com").unwrap();
