@@ -31,6 +31,7 @@ pub struct DeviceStatus {
     pub allocated_mb: u64,
     pub apps: u32,
     pub last_seen: Option<DateTime<Utc>>,
+    pub req_per_sec: f64,
 }
 
 impl Daemon {
@@ -78,30 +79,52 @@ impl Daemon {
         }
     }
 
-    pub fn fleet_view(&self) -> FleetView {
+    /// The whole fleet as rows: THIS machine (the hub) first, then every
+    /// joined device, each with live req/s.
+    pub async fn fleet_view(&self) -> FleetView {
         let fleet = self.store.fleet_snapshot();
         let statuses = self.fleet_status.lock().unwrap().clone();
         let placements = &fleet.placements;
-        let devices = fleet
-            .devices
-            .iter()
-            .map(|d| {
-                let st = statuses.get(&d.name).cloned().unwrap_or_default();
-                let placed = placements.values().filter(|v| **v == d.name).count() as u32;
-                FleetDeviceView {
-                    name: d.name.clone(),
-                    control_url: d.control_url.clone(),
-                    healthy: st.healthy,
-                    vm_memory_mb: st.vm_memory_mb,
-                    allocatable_mb: st.allocatable_mb,
-                    allocated_mb: st.allocated_mb,
-                    free_mb: st.allocatable_mb.saturating_sub(st.allocated_mb),
-                    apps: st.apps.max(placed),
-                    last_seen: st.last_seen,
-                    added_at: d.added_at,
-                }
-            })
-            .collect();
+
+        let l = self.resource_ledger().await.ok();
+        let vm = l.as_ref().map(|x| x.vm_memory_mb).unwrap_or(0);
+        let alloc = l.as_ref().map(|x| x.allocatable_mb).unwrap_or(0);
+        let used = l.as_ref().map(|x| x.allocated_mb).unwrap_or(0);
+        let mut devices = vec![FleetDeviceView {
+            name: short_hostname(),
+            control_url: self.control_url.lock().unwrap().clone().unwrap_or_default(),
+            healthy: self
+                .doctor_green
+                .load(std::sync::atomic::Ordering::Relaxed),
+            vm_memory_mb: vm,
+            allocatable_mb: alloc,
+            allocated_mb: used,
+            free_mb: alloc.saturating_sub(used),
+            apps: self.store.snapshot().len() as u32,
+            last_seen: Some(Utc::now()),
+            added_at: self.started_at,
+            is_self: true,
+            req_per_sec: *self.req_per_sec.lock().unwrap(),
+        }];
+
+        for d in &fleet.devices {
+            let st = statuses.get(&d.name).cloned().unwrap_or_default();
+            let placed = placements.values().filter(|v| **v == d.name).count() as u32;
+            devices.push(FleetDeviceView {
+                name: d.name.clone(),
+                control_url: d.control_url.clone(),
+                healthy: st.healthy,
+                vm_memory_mb: st.vm_memory_mb,
+                allocatable_mb: st.allocatable_mb,
+                allocated_mb: st.allocated_mb,
+                free_mb: st.allocatable_mb.saturating_sub(st.allocated_mb),
+                apps: st.apps.max(placed),
+                last_seen: st.last_seen,
+                added_at: d.added_at,
+                is_self: false,
+                req_per_sec: st.req_per_sec,
+            });
+        }
         FleetView { devices }
     }
 }
@@ -129,6 +152,7 @@ pub async fn poll(d: Arc<Daemon>) {
                     allocated_mb: s.ledger.allocated_mb,
                     apps: s.apps.len() as u32,
                     last_seen: Some(Utc::now()),
+                    req_per_sec: s.req_per_sec,
                 },
                 Err(e) => {
                     tracing::debug!(device = %dev.name, "fleet poll failed: {}", e.error);
@@ -175,6 +199,7 @@ pub async fn poll_one(d: &Arc<Daemon>, name: &str) {
                     allocated_mb: s.ledger.allocated_mb,
                     apps: s.apps.len() as u32,
                     last_seen: Some(Utc::now()),
+                    req_per_sec: s.req_per_sec,
                 },
             );
         }
@@ -204,3 +229,13 @@ pub async fn merged_apps(d: &Arc<Daemon>) -> Vec<hades_api::types::AppInfo> {
 }
 
 pub type FleetStatusMap = HashMap<String, DeviceStatus>;
+
+pub(crate) fn short_hostname() -> String {
+    std::process::Command::new("hostname")
+        .arg("-s")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "host".into())
+}

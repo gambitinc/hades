@@ -954,6 +954,31 @@ impl Daemon {
             old: None,
             new: format!("https://{hostname}"),
         });
+        // if this is a device, push the new stable URL to the hub right away so
+        // it stops polling the old (quick) one — no restart needed
+        if let (Some(hub), Some(hub_tok), Some(own_tok)) = (
+            self.config.fleet.hub_url.clone(),
+            self.config.fleet.hub_token.clone(),
+            self.config.auth_token.clone(),
+        ) {
+            let url = format!("https://{hostname}");
+            tokio::spawn(async move {
+                // give the named tunnel a few seconds to become routable
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let req = hades_api::types::JoinRequest {
+                    name: crate::fleet::short_hostname(),
+                    control_url: url,
+                    token: own_tok,
+                };
+                match hades_api::DaemonClient::for_host(&hub, Some(hub_tok))
+                    .join(&req)
+                    .await
+                {
+                    Ok(_) => tracing::info!("registered stable control URL with hub {hub}"),
+                    Err(e) => tracing::warn!("hub register after stabilize failed: {}", e.error),
+                }
+            });
+        }
     }
 
     /// The stable control claim, if this host has one.

@@ -114,6 +114,10 @@ pub struct HostStatus {
     pub ledger: ResourceLedger,
     pub power: PowerStatus,
     pub availability_pct_7d: Option<f64>,
+    /// Live requests/sec this host is serving right now (its own proxy +
+    /// relayed-in load), sampled once a second.
+    #[serde(default)]
+    pub req_per_sec: f64,
     pub apps: Vec<AppInfo>,
 }
 
@@ -205,6 +209,12 @@ pub struct FleetDeviceView {
     pub apps: u32,
     pub last_seen: Option<DateTime<Utc>>,
     pub added_at: DateTime<Utc>,
+    /// True for the hub's own row (this machine), false for joined devices.
+    #[serde(default)]
+    pub is_self: bool,
+    /// Live requests/sec this machine is serving.
+    #[serde(default)]
+    pub req_per_sec: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

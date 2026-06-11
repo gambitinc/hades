@@ -97,9 +97,14 @@
       <div class="sub" id="uptime-sub"></div>
     </div>
     <div class="cell">
-      <div class="label">Live load now</div>
+      <div class="label">Live load · this machine</div>
       <div class="big"><span id="now">0</span><span class="u">req/s</span></div>
       <div class="sub" id="now-sub"></div>
+    </div>
+    <div class="cell">
+      <div class="label">Live load · whole fleet</div>
+      <div class="big"><span id="fleet-load">0</span><span class="u">req/s</span></div>
+      <div class="sub" id="fleet-load-sub"></div>
     </div>
     <div class="cell">
       <div class="label">This machine</div>
@@ -114,7 +119,7 @@
   <div class="section" style="margin-bottom:26px">
     <h2>The fleet</h2>
     <table id="fleet-table">
-      <thead><tr><th>device</th><th>health</th><th class="num">free</th><th class="num">apps</th><th class="num">last seen</th></tr></thead>
+      <thead><tr><th>machine</th><th>health</th><th class="num">load</th><th class="num">free</th><th class="num">apps</th><th class="num">last seen</th></tr></thead>
       <tbody id="fleet-body"></tbody>
     </table>
   </div>
@@ -177,9 +182,11 @@ async function poll(){
   $('uptime').textContent = m.machine.uptime_pct_7d == null ? '—' : m.machine.uptime_pct_7d.toFixed(2);
   $('uptime-sub').textContent = 'up since ' + m.machine.started;
 
-  // live load
+  // live load — this machine, and the whole fleet
   $('now').textContent = fmt(m.capacity.current_req_per_sec);
   $('now-sub').innerHTML = `<b>${m.capacity.inflight}</b> in flight · <b>${fmt(m.capacity.total_requests)}</b> served total`;
+  $('fleet-load').textContent = fmt(m.fleet.req_per_sec || 0);
+  $('fleet-load-sub').innerHTML = `across <b>${m.fleet.count}</b> machine${m.fleet.count===1?'':'s'} · <b>${m.fleet.healthy}</b> healthy`;
 
   // machine stats
   $('machine-stats').innerHTML =
@@ -198,10 +205,11 @@ async function poll(){
   if(hist.length>80) hist.shift();
   drawSpark();
 
-  // fleet table
+  // fleet table — this machine first, then devices, each with live load
   $('fleet-body').innerHTML = m.fleet.devices.map(d=>`
     <tr><td>${d.name}${d.is_self?' <span class="gold">(this)</span>':''}</td>
     <td><span class="pill ${d.healthy?'green':'red'}">${d.healthy?'green':'red'}</span></td>
+    <td class="num">${fmt(d.load||0)}<span class="muted"> r/s</span></td>
     <td class="num">${d.free_mb==null?'—':(d.free_mb/1024).toFixed(1)+'GB'}</td>
     <td class="num">${d.apps==null?'—':d.apps}</td>
     <td class="num">${d.last_seen||'—'}</td></tr>`).join('');

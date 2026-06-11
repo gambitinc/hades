@@ -200,20 +200,30 @@ pub fn ps(p: &PsReport) {
 
 pub fn fleet(v: &FleetView) {
     println!(
-        "{:<12} {:<8} {:>10} {:>12} {:<6} LAST SEEN",
-        "DEVICE", "HEALTH", "FREE", "ALLOCATABLE", "APPS"
+        "{:<22} {:<8} {:>9} {:>9} {:>12} {:<6} LAST SEEN",
+        "MACHINE", "HEALTH", "LOAD", "FREE", "ALLOCATABLE", "APPS"
     );
     for d in &v.devices {
+        let name = if d.is_self {
+            format!("{} (this)", d.name)
+        } else {
+            d.name.clone()
+        };
         println!(
-            "{:<12} {:<8} {:>8}MB {:>10}MB {:<6} {}",
-            d.name,
+            "{:<22} {:<8} {:>5} r/s {:>7}MB {:>10}MB {:<6} {}",
+            name,
             if d.healthy { "green" } else { "red" },
+            d.req_per_sec.round() as u64,
             d.free_mb,
             d.allocatable_mb,
             d.apps,
-            d.last_seen
-                .map(|t| t.format("%H:%M:%S").to_string())
-                .unwrap_or_else(|| "never".into()),
+            if d.is_self {
+                "now".into()
+            } else {
+                d.last_seen
+                    .map(|t| t.format("%H:%M:%S").to_string())
+                    .unwrap_or_else(|| "never".into())
+            },
         );
     }
 }

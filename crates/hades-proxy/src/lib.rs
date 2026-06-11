@@ -330,9 +330,12 @@ async fn handle(
         Err(_) => return Ok(empty_response(StatusCode::BAD_GATEWAY)),
     };
 
+    // Per-machine load is counted where a request is SERVED: a request served
+    // by a local replica counts on this machine; one relayed to another machine
+    // is counted there (in its relay handler). So the host counters never
+    // double-count a request, and a fleet-wide total is a clean sum.
     route.inflight.fetch_add(1, Ordering::Relaxed);
     route.requests.fetch_add(1, Ordering::Relaxed);
-    metrics.requests.fetch_add(1, Ordering::Relaxed);
     metrics.inflight.fetch_add(1, Ordering::Relaxed);
     let started = Instant::now();
 
@@ -354,6 +357,8 @@ async fn handle(
                 );
                 match client.request(outgoing).await {
                     Ok(resp) => {
+                        // served locally → counts as this machine's load
+                        metrics.requests.fetch_add(1, Ordering::Relaxed);
                         if let Some(len) = resp
                             .headers()
                             .get(hyper::header::CONTENT_LENGTH)
@@ -371,7 +376,7 @@ async fn handle(
                 }
             }
             Backend::Remote { relay, token } => {
-                forward_remote(&http, relay, token, &parts, &path_q, &body_bytes, &metrics).await
+                forward_remote(&http, relay, token, &parts, &path_q, &body_bytes).await
             }
         };
         if let Some(resp) = attempt {
@@ -400,7 +405,6 @@ async fn forward_remote(
     parts: &hyper::http::request::Parts,
     path_q: &str,
     body: &Bytes,
-    metrics: &Arc<Metrics>,
 ) -> Option<Response<ProxyBody>> {
     let url = format!("{relay}{path_q}");
     let method = reqwest::Method::from_bytes(parts.method.as_str().as_bytes()).ok()?;
@@ -430,7 +434,8 @@ async fn forward_remote(
     }
     let headers = resp.headers().clone();
     let bytes = resp.bytes().await.unwrap_or_default();
-    metrics.bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+    // bytes/requests for a relayed response are counted on the machine that
+    // served it, in its relay handler — not here.
     let mut out = full_response(status, bytes);
     for (name, value) in headers.iter() {
         if is_hop_header(name.as_str()) {

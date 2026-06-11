@@ -209,10 +209,11 @@ async fn sample_and_pressure(d: &Arc<Daemon>) {
     }
 
     // Continuously (not just on a transition) resume anything we paused for
-    // memory pressure once there's headroom again. The transition event can
-    // be missed across a daemon restart, which would otherwise leave apps
-    // paused forever; this self-heals that.
-    if level == PressureLevel::Normal {
+    // memory pressure once we're back below CRITICAL. Waiting for fully
+    // Normal meant a transient spike could leave apps paused while memory
+    // hovered at Warn; resuming at !Critical self-heals that (and the restart
+    // gap, since this runs every tick, not just on a transition).
+    if level != PressureLevel::Critical {
         for (name, rec) in d.store.snapshot() {
             if rec.state == AppState::Paused
                 && rec.paused_reason == Some(hades_core::events::PauseReason::MemoryPressure)

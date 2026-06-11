@@ -615,31 +615,39 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
     let health = probe.battery_health();
 
     let week = chrono::Utc::now() - chrono::Duration::days(7);
-    let fleet = d.fleet_view();
+    let fleet = d.fleet_view().await;
     let is_hub = d.config.fleet.hub_url.is_none();
     let self_healthy = d.doctor_green.load(Ordering::Relaxed);
 
-    // device rows: this machine first, then the joined devices
-    let mut devices = vec![serde_json::json!({
-        "name": short_hostname(),
-        "is_self": true,
-        "healthy": self_healthy,
-        "free_mb": ledger.as_ref().map(|l| l.allocatable_mb.saturating_sub(l.allocated_mb)),
-        "apps": d.store.snapshot().len(),
-        "last_seen": "now",
-    })];
-    let mut healthy_count = if self_healthy { 1 } else { 0 };
-    for dev in &fleet.devices {
-        if dev.healthy { healthy_count += 1; }
-        devices.push(serde_json::json!({
-            "name": dev.name,
-            "is_self": false,
-            "healthy": dev.healthy,
-            "free_mb": dev.free_mb,
-            "apps": dev.apps,
-            "last_seen": dev.last_seen.map(|t| t.format("%H:%M:%S").to_string()),
-        }));
-    }
+    // fleet.devices already includes THIS machine as the first row (is_self);
+    // per-machine load is its live req/s, and the fleet total is their sum
+    let mut healthy_count = 0u32;
+    let mut fleet_req_per_sec = 0f64;
+    let devices: Vec<serde_json::Value> = fleet
+        .devices
+        .iter()
+        .map(|dev| {
+            if dev.healthy {
+                healthy_count += 1;
+            }
+            fleet_req_per_sec += dev.req_per_sec;
+            serde_json::json!({
+                "name": dev.name,
+                "is_self": dev.is_self,
+                "healthy": dev.healthy,
+                "free_mb": dev.free_mb,
+                "apps": dev.apps,
+                "load": dev.req_per_sec,
+                "last_seen": if dev.is_self {
+                    "now".to_string()
+                } else {
+                    dev.last_seen
+                        .map(|t| t.format("%H:%M:%S").to_string())
+                        .unwrap_or_else(|| "never".into())
+                },
+            })
+        })
+        .collect();
 
     // apps and where each one's instances live (this machine + spreads)
     let fleet_file = d.store.fleet_snapshot();
@@ -723,8 +731,9 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
             "total_requests": req_total,
         },
         "fleet": {
-            "count": fleet.devices.len() + 1,
+            "count": fleet.devices.len(),
             "healthy": healthy_count,
+            "req_per_sec": fleet_req_per_sec,
             "devices": devices,
         },
         "apps": app_rows,
@@ -811,11 +820,11 @@ async fn fleet_join(
     });
     fleet::poll_one(&d, &req.name).await;
     tracing::info!(device = %req.name, "fleet: device joined");
-    Json(d.fleet_view()).into_response()
+    Json(d.fleet_view().await).into_response()
 }
 
 async fn fleet_list(State(d): State<D>) -> Json<hades_api::types::FleetView> {
-    Json(d.fleet_view())
+    Json(d.fleet_view().await)
 }
 
 async fn fleet_remove(State(d): State<D>, Path(name): Path<String>) -> Response {
@@ -827,7 +836,7 @@ async fn fleet_remove(State(d): State<D>, Path(name): Path<String>) -> Response 
     });
     d.fleet_status.lock().unwrap().remove(&name);
     if existed {
-        Json(d.fleet_view()).into_response()
+        Json(d.fleet_view().await).into_response()
     } else {
         err_response(&HadesError::AppNotFound(format!("device {name}")), None)
     }
@@ -915,7 +924,12 @@ async fn relay_inner(d: D, app: String, req: axum::extract::Request) -> Response
         }
         rb = rb.header(name.as_str(), value.as_bytes());
     }
-    match rb.send().await {
+    // a relayed request is real load on THIS machine — count it so this host's
+    // live req/s reflects the work it does for spread apps
+    use std::sync::atomic::Ordering;
+    d.proxy_metrics.requests.fetch_add(1, Ordering::Relaxed);
+    d.proxy_metrics.inflight.fetch_add(1, Ordering::Relaxed);
+    let out = match rb.send().await {
         Ok(resp) => {
             let mut builder = Response::builder().status(resp.status().as_u16());
             for (name, value) in resp.headers().iter() {
@@ -926,13 +940,18 @@ async fn relay_inner(d: D, app: String, req: axum::extract::Request) -> Response
                 builder = builder.header(name.as_str(), value.as_bytes());
             }
             let bytes = resp.bytes().await.unwrap_or_default();
+            d.proxy_metrics
+                .bytes
+                .fetch_add(bytes.len() as u64, Ordering::Relaxed);
             builder.body(Body::from(bytes)).unwrap_or_else(|_| relay_gateway_error())
         }
         Err(e) => {
             tracing::warn!(app = %app, "relay upstream error: {e}");
             relay_gateway_error()
         }
-    }
+    };
+    d.proxy_metrics.inflight.fetch_sub(1, Ordering::Relaxed);
+    out
 }
 
 #[derive(Deserialize)]
@@ -1053,6 +1072,7 @@ async fn host_status(State(d): State<D>) -> Response {
             capacity_pct_of_design: health.and_then(|h| h.capacity_pct_of_design()),
         },
         availability_pct_7d: Some(d.ledger.availability_pct(week_ago)),
+        req_per_sec: *d.req_per_sec.lock().unwrap(),
         apps,
     })
     .into_response()
