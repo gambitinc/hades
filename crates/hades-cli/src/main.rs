@@ -101,6 +101,12 @@ enum Cmd {
         #[arg(long)]
         to: String,
     },
+    /// Send feedback or report an issue. Collected centrally.
+    Feedback {
+        /// The issue / feedback text (omit to be prompted).
+        #[arg(trailing_var_arg = true)]
+        issue: Vec<String>,
+    },
     /// Run networking self-tests — uptime, response rate, load balancing —
     /// on the whole fleet or one machine. Run with no flag to pick.
     Test {
@@ -399,6 +405,7 @@ async fn main() -> ExitCode {
         Cmd::Apps { cmd } => apps_cmd(cmd, json).await,
         Cmd::Secrets { cmd } => secrets_cmd(cmd, json).await,
         Cmd::Fleet { cmd } => fleet_cmd(cmd.unwrap_or(FleetCmd::List), json).await,
+        Cmd::Feedback { issue } => feedback_cmd(issue, json).await,
         Cmd::Test { device, fleet } => test_cmd(device, fleet, json).await,
         Cmd::Spread { app, to } => spread_cmd(app, to, json).await,
         Cmd::Gather { app, from } => gather_cmd(app, from, json).await,
@@ -1330,6 +1337,55 @@ async fn stabilize_cmd(name: Option<String>, json: bool) -> ExitCode {
             ),
             json,
         )
+    }
+}
+
+/// Where feedback is collected (a Convex HTTP action). Override with
+/// HADES_FEEDBACK_URL. This is a public ingest URL, not a secret.
+const FEEDBACK_URL: &str = "https://dependable-bird-390.convex.site/feedback";
+
+async fn feedback_cmd(issue: Vec<String>, json: bool) -> ExitCode {
+    use std::io::Write;
+    let mut text = issue.join(" ").trim().to_string();
+    if text.is_empty() {
+        print!("what's the issue? ");
+        let _ = std::io::stdout().flush();
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        text = line.trim().to_string();
+    }
+    if text.is_empty() {
+        return fail(HadesError::Other("no feedback text given".into()), json);
+    }
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let url = std::env::var("HADES_FEEDBACK_URL").unwrap_or_else(|_| FEEDBACK_URL.to_string());
+    let body = serde_json::json!({ "issue": text, "timestamp": timestamp });
+    match reqwest::Client::new()
+        .post(&url)
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => {
+            if json {
+                render::json(&serde_json::json!({ "sent": true, "timestamp": timestamp }));
+            } else {
+                println!("  ✓ feedback sent — thank you");
+            }
+            ExitCode::SUCCESS
+        }
+        Ok(r) => fail(
+            HadesError::Other(format!("feedback endpoint returned {}", r.status())),
+            json,
+        ),
+        Err(e) => fail(
+            HadesError::Other(format!("could not reach the feedback endpoint: {e}")),
+            json,
+        ),
     }
 }
 
