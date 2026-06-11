@@ -678,24 +678,16 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
     }
 
     let ledger = d.resource_ledger().await.ok();
-    let (req_total, byte_total, inflight) = d.proxy_metrics.snapshot();
+    let (req_total, _byte_total, inflight) = d.proxy_metrics.snapshot();
 
-    // capacity: the network is usually the binding constraint, so req/s ≈
-    // upstream bytes/sec divided by the average response size, capped by a
-    // rough CPU ceiling.
-    let avg_resp = if req_total > 0 {
-        (byte_total as f64 / req_total as f64).max(200.0)
-    } else {
-        30_000.0
-    };
-    let upload_mbps = *d.upload_mbps.lock().unwrap();
-    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    let cpu_cap = cores as f64 * 8000.0;
-    let net_cap = upload_mbps.map(|m| (m * 1_000_000.0 / 8.0) / avg_resp);
-    let (capacity, cpu_bound) = match net_cap {
-        Some(n) => (Some(n.min(cpu_cap)), cpu_cap < n),
-        None => (None, false),
-    };
+    // this machine's estimated serving ceiling (the fleet total is the sum of
+    // every machine's, computed below)
+    let est = d.capacity_estimate();
+    let capacity = est.req_per_sec;
+    let cpu_bound = est.cpu_bound;
+    let upload_mbps = est.upload_mbps;
+    let avg_response_kb = est.avg_response_kb;
+    let cores = est.cpu_cores;
 
     use hades_host::HostProbe;
     let probe = hades_host::MacProbe;
@@ -711,6 +703,7 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
     // per-machine load is its live req/s, and the fleet total is their sum
     let mut healthy_count = 0u32;
     let mut fleet_req_per_sec = 0f64;
+    let mut fleet_capacity = 0f64;
     let devices: Vec<serde_json::Value> = fleet
         .devices
         .iter()
@@ -719,6 +712,7 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
                 healthy_count += 1;
             }
             fleet_req_per_sec += dev.req_per_sec;
+            fleet_capacity += dev.capacity_req_per_sec.unwrap_or(0.0);
             serde_json::json!({
                 "name": dev.name,
                 "is_self": dev.is_self,
@@ -726,6 +720,7 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
                 "free_mb": dev.free_mb,
                 "apps": dev.apps,
                 "load": dev.req_per_sec,
+                "capacity": dev.capacity_req_per_sec,
                 "last_seen": if dev.is_self {
                     "now".to_string()
                 } else {
@@ -812,7 +807,7 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
             "req_per_sec": capacity,
             "cpu_bound": cpu_bound,
             "upload_mbps": upload_mbps,
-            "avg_response_kb": avg_resp / 1024.0,
+            "avg_response_kb": avg_response_kb,
             "cpu_cores": cores,
             "current_req_per_sec": *d.req_per_sec.lock().unwrap(),
             "inflight": inflight,
@@ -822,6 +817,7 @@ async fn dashboard_metrics(State(d): State<D>) -> Response {
             "count": fleet.devices.len(),
             "healthy": healthy_count,
             "req_per_sec": fleet_req_per_sec,
+            "capacity_req_per_sec": fleet_capacity,
             "devices": devices,
         },
         "apps": app_rows,
@@ -1177,6 +1173,7 @@ async fn host_status(State(d): State<D>) -> Response {
         },
         availability_pct_7d: Some(d.ledger.availability_pct(week_ago)),
         req_per_sec: *d.req_per_sec.lock().unwrap(),
+        capacity_req_per_sec: d.capacity_estimate().req_per_sec,
         apps,
     })
     .into_response()

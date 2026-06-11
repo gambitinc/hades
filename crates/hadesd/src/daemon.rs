@@ -24,6 +24,16 @@ use crate::state::{AppRecord, ReplicaRecord, Store};
 /// served over a named tunnel). Never a real app name.
 pub const CONTROL_CLAIM_KEY: &str = "__control";
 
+/// A host's estimated serving ceiling and the inputs behind it.
+pub struct CapacityEstimate {
+    /// Estimated max requests/sec; None until upstream bandwidth is probed.
+    pub req_per_sec: Option<f64>,
+    pub cpu_bound: bool,
+    pub upload_mbps: Option<f64>,
+    pub avg_response_kb: f64,
+    pub cpu_cores: usize,
+}
+
 pub struct Daemon {
     pub config: HadesConfig,
     pub paths: HadesPaths,
@@ -65,6 +75,35 @@ impl Daemon {
     pub fn emit(&self, event: HostEvent) {
         tracing::info!(event = ?event, "event");
         let _ = self.bus.send(EventEnvelope::now(event));
+    }
+
+    /// Estimated max requests/sec this host can serve: upstream bytes/sec ÷
+    /// average response size, capped by a rough CPU ceiling. The network is
+    /// usually the binding constraint for a home host.
+    pub fn capacity_estimate(&self) -> CapacityEstimate {
+        let (req_total, byte_total, _) = self.proxy_metrics.snapshot();
+        let avg_resp = if req_total > 0 {
+            (byte_total as f64 / req_total as f64).max(200.0)
+        } else {
+            30_000.0
+        };
+        let upload_mbps = *self.upload_mbps.lock().unwrap();
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let cpu_cap = cores as f64 * 8000.0;
+        let net_cap = upload_mbps.map(|m| (m * 1_000_000.0 / 8.0) / avg_resp);
+        let (req_per_sec, cpu_bound) = match net_cap {
+            Some(n) => (Some(n.min(cpu_cap)), cpu_cap < n),
+            None => (None, false),
+        };
+        CapacityEstimate {
+            req_per_sec,
+            cpu_bound,
+            upload_mbps,
+            avg_response_kb: avg_resp / 1024.0,
+            cpu_cores: cores,
+        }
     }
 
     // ----- resource ledger / admission -----

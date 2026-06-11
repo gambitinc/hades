@@ -81,7 +81,7 @@
 
   <div class="grid">
     <div class="cell wide">
-      <div class="label">Requests / sec it can serve</div>
+      <div class="label">Est. req / sec · whole fleet</div>
       <div class="big"><span id="capacity">…</span><span class="u">req/s</span></div>
       <canvas class="spark" id="spark"></canvas>
       <div class="sub" id="capacity-sub">measuring…</div>
@@ -119,7 +119,7 @@
   <div class="section" style="margin-bottom:26px">
     <h2>The fleet</h2>
     <table id="fleet-table">
-      <thead><tr><th>machine</th><th>health</th><th class="num">load</th><th class="num">free</th><th class="num">apps</th><th class="num">last seen</th></tr></thead>
+      <thead><tr><th>machine</th><th>health</th><th class="num">load</th><th class="num">est cap</th><th class="num">free</th><th class="num">apps</th><th class="num">last seen</th></tr></thead>
       <tbody id="fleet-body"></tbody>
     </table>
   </div>
@@ -168,11 +168,14 @@ async function poll(){
 
   // headline capacity
   const cap = m.capacity;
-  $('capacity').textContent = cap.req_per_sec == null ? '…' : fmt(cap.req_per_sec);
+  // headline = whole-fleet estimated capacity (sum of every machine); the
+  // sub-line breaks out this machine
+  $('capacity').textContent = m.fleet.capacity_req_per_sec == null ? '…' : fmt(m.fleet.capacity_req_per_sec);
   $('capacity-sub').innerHTML = cap.upload_mbps == null
     ? 'measuring upstream bandwidth…'
-    : `<b>${cap.upload_mbps.toFixed(1)} Mbps</b> up · avg response <b>${cap.avg_response_kb.toFixed(0)} KB</b> · <b>${cap.cpu_cores}</b> cores`
-      + (cap.cpu_bound ? ' · <span class="gold">CPU-bound</span>' : ' · network-bound');
+    : `sum across <b>${m.fleet.count}</b> machine${m.fleet.count===1?'':'s'} · this one <b>${cap.req_per_sec==null?'…':fmt(cap.req_per_sec)}</b> r/s `
+      + `(<b>${cap.upload_mbps.toFixed(1)}</b> Mbps up, <b>${cap.cpu_cores}</b> cores`
+      + (cap.cpu_bound ? ', <span class="gold">CPU-bound</span>)' : ', network-bound)');
 
   // machines
   $('machines').textContent = m.fleet.count;
@@ -210,6 +213,7 @@ async function poll(){
     <tr><td>${d.name}${d.is_self?' <span class="gold">(this)</span>':''}</td>
     <td><span class="pill ${d.healthy?'green':'red'}">${d.healthy?'green':'red'}</span></td>
     <td class="num">${fmt(d.load||0)}<span class="muted"> r/s</span></td>
+    <td class="num">${d.capacity==null?'—':fmt(d.capacity)+'<span class="muted"> r/s</span>'}</td>
     <td class="num">${d.free_mb==null?'—':(d.free_mb/1024).toFixed(1)+'GB'}</td>
     <td class="num">${d.apps==null?'—':d.apps}</td>
     <td class="num">${d.last_seen||'—'}</td></tr>`).join('');

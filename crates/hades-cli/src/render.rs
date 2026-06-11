@@ -200,8 +200,8 @@ pub fn ps(p: &PsReport) {
 
 pub fn fleet(v: &FleetView) {
     println!(
-        "{:<22} {:<8} {:>9} {:>9} {:>12} {:<6} LAST SEEN",
-        "MACHINE", "HEALTH", "LOAD", "FREE", "ALLOCATABLE", "APPS"
+        "{:<22} {:<8} {:>9} {:>9} {:>9} {:<6} LAST SEEN",
+        "MACHINE", "HEALTH", "LOAD", "EST CAP", "FREE", "APPS"
     );
     for d in &v.devices {
         let name = if d.is_self {
@@ -209,13 +209,17 @@ pub fn fleet(v: &FleetView) {
         } else {
             d.name.clone()
         };
+        let cap = d
+            .capacity_req_per_sec
+            .map(|c| format!("{} r/s", c.round() as u64))
+            .unwrap_or_else(|| "—".into());
         println!(
-            "{:<22} {:<8} {:>5} r/s {:>7}MB {:>10}MB {:<6} {}",
+            "{:<22} {:<8} {:>5} r/s {:>9} {:>7}MB {:<6} {}",
             name,
             if d.healthy { "green" } else { "red" },
             d.req_per_sec.round() as u64,
+            cap,
             d.free_mb,
-            d.allocatable_mb,
             d.apps,
             if d.is_self {
                 "now".into()

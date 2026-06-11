@@ -32,6 +32,7 @@ pub struct DeviceStatus {
     pub apps: u32,
     pub last_seen: Option<DateTime<Utc>>,
     pub req_per_sec: f64,
+    pub capacity_req_per_sec: Option<f64>,
 }
 
 impl Daemon {
@@ -105,6 +106,7 @@ impl Daemon {
             added_at: self.started_at,
             is_self: true,
             req_per_sec: *self.req_per_sec.lock().unwrap(),
+            capacity_req_per_sec: self.capacity_estimate().req_per_sec,
         }];
 
         for d in &fleet.devices {
@@ -123,6 +125,7 @@ impl Daemon {
                 added_at: d.added_at,
                 is_self: false,
                 req_per_sec: st.req_per_sec,
+                capacity_req_per_sec: st.capacity_req_per_sec,
             });
         }
         FleetView { devices }
@@ -153,6 +156,7 @@ pub async fn poll(d: Arc<Daemon>) {
                     apps: s.apps.len() as u32,
                     last_seen: Some(Utc::now()),
                     req_per_sec: s.req_per_sec,
+                    capacity_req_per_sec: s.capacity_req_per_sec,
                 },
                 Err(e) => {
                     tracing::debug!(device = %dev.name, "fleet poll failed: {}", e.error);
@@ -200,6 +204,7 @@ pub async fn poll_one(d: &Arc<Daemon>, name: &str) {
                     apps: s.apps.len() as u32,
                     last_seen: Some(Utc::now()),
                     req_per_sec: s.req_per_sec,
+                    capacity_req_per_sec: s.capacity_req_per_sec,
                 },
             );
         }

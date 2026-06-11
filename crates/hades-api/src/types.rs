@@ -118,6 +118,10 @@ pub struct HostStatus {
     /// relayed-in load), sampled once a second.
     #[serde(default)]
     pub req_per_sec: f64,
+    /// Estimated max requests/sec this host can serve (None until bandwidth is
+    /// probed).
+    #[serde(default)]
+    pub capacity_req_per_sec: Option<f64>,
     pub apps: Vec<AppInfo>,
 }
 
@@ -215,6 +219,9 @@ pub struct FleetDeviceView {
     /// Live requests/sec this machine is serving.
     #[serde(default)]
     pub req_per_sec: f64,
+    /// Estimated max requests/sec this machine can serve.
+    #[serde(default)]
+    pub capacity_req_per_sec: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
