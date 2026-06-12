@@ -234,6 +234,42 @@ impl DaemonClient {
         .await
     }
 
+    /// Push a claim replica to a device so it serves the claimed domain too
+    /// (runs a second Cloudflare connector pointed at its local instance).
+    pub async fn adopt_claim_replica(
+        &self,
+        app: &str,
+        name: &str,
+        hostname: &str,
+        connector_token: &str,
+    ) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(self.http.post(format!("{}/apps/{app}/claim-replica", self.base)))
+                .json(&serde_json::json!({
+                    "name": name,
+                    "hostname": hostname,
+                    "connector_token": connector_token,
+                }))
+                .timeout(std::time::Duration::from_secs(30))
+                .send()
+                .await,
+        )
+        .await
+    }
+
+    /// Stop a device serving a claim replica.
+    pub async fn drop_claim_replica(&self, app: &str) -> Result<serde_json::Value, ApiError> {
+        Self::check(
+            self.auth(
+                self.http
+                    .delete(format!("{}/apps/{app}/claim-replica", self.base)),
+            )
+            .send()
+            .await,
+        )
+        .await
+    }
+
     /// Run another instance of a hub-hosted app on a fleet device.
     pub async fn app_spread(&self, app: &str, device: &str) -> Result<serde_json::Value, ApiError> {
         Self::check(

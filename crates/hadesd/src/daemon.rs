@@ -878,6 +878,18 @@ impl Daemon {
         if let Some(rec) = self.store.get(app) {
             self.install_routes(&rec);
         }
+        // if this app owns a claimed domain, make the device a second public
+        // entry point for it (HA: the domain survives this hub going down)
+        if let Some(claim) = self.store.claim_for(app) {
+            if let Some(client) = self.device_client(device) {
+                if let Err(e) = client
+                    .adopt_claim_replica(app, &claim.name, &claim.hostname, &claim.connector_token)
+                    .await
+                {
+                    tracing::warn!(app, device, "claim replica push failed: {}", e.error);
+                }
+            }
+        }
         self.emit(HostEvent::AppDeployed {
             app: format!("{app} +{device}"),
             replaced: false,
@@ -907,6 +919,7 @@ impl Daemon {
         }
         for dev in &targets {
             if let Some(client) = self.device_client(dev) {
+                let _ = client.drop_claim_replica(app).await;
                 let _ = client.destroy(app).await;
             }
         }
@@ -1199,6 +1212,19 @@ impl Daemon {
         if let Some(rec) = self.store.get(app) {
             self.install_routes(&rec);
         }
+        // if the app is already spread, give every spread machine its own
+        // connector for this domain so it stays up when this hub is down
+        let spread_to = self.store.fleet_snapshot().spreads.get(app).cloned().unwrap_or_default();
+        for dev in spread_to {
+            if let Some(client) = self.device_client(&dev) {
+                if let Err(e) = client
+                    .adopt_claim_replica(app, name, &record.hostname, &record.connector_token)
+                    .await
+                {
+                    tracing::warn!(app, device = %dev, "claim replica push failed: {}", e.error);
+                }
+            }
+        }
         self.emit(HostEvent::UrlChanged {
             app: app.to_string(),
             old: None,
@@ -1212,6 +1238,13 @@ impl Daemon {
             .store
             .claim_for(app)
             .ok_or_else(|| HadesError::Other(format!("{app} has no claimed domain")))?;
+        // stop every spread machine's replica connector for this domain first
+        let spread_to = self.store.fleet_snapshot().spreads.get(app).cloned().unwrap_or_default();
+        for dev in spread_to {
+            if let Some(client) = self.device_client(&dev) {
+                let _ = client.drop_claim_replica(app).await;
+            }
+        }
         // stop the tunnel
         self.stop_tunnel_task(&format!("__claim_{app}"));
         if let Some(pid) = self
@@ -1245,6 +1278,61 @@ impl Daemon {
             self.install_routes(&rec);
         }
         Ok(claim.hostname)
+    }
+
+    /// Adopt a claim *replica* (pushed by the hub when a claimed app is spread
+    /// here). Running the same connector token gives the claimed domain a
+    /// second Cloudflare connector that serves from THIS machine's local
+    /// instance, so the domain stays up when the hub is asleep or down.
+    pub fn adopt_claim_replica(
+        self: &std::sync::Arc<Self>,
+        record: crate::state::ClaimRecord,
+    ) -> Result<(), HadesError> {
+        if self.store.get(&record.app).is_none() {
+            return Err(HadesError::AppNotFound(format!(
+                "{} is not deployed here; cannot serve its domain",
+                record.app
+            )));
+        }
+        self.store.update_claims(|c| {
+            c.insert(record.app.clone(), record.clone());
+        });
+        // route the claimed hostname to this machine's local instance, and run
+        // the connector so Cloudflare can reach us directly
+        if let Some(rec) = self.store.get(&record.app) {
+            self.install_routes(&rec);
+        }
+        self.spawn_claim_tunnel(&record);
+        tracing::info!(app = %record.app, host = %record.hostname, "serving claimed domain as a replica");
+        Ok(())
+    }
+
+    /// Stop serving a claim replica (the hub gathered the app, or released the
+    /// domain). Tears down this machine's connector but never touches the
+    /// coordinator — the hub owns the claim itself.
+    pub fn drop_claim_replica(&self, app: &str) {
+        let key = format!("__claim_{app}");
+        self.stop_tunnel_task(&key);
+        if let Some(pid) = self
+            .store
+            .registry_snapshot()
+            .cloudflared
+            .get(&key)
+            .copied()
+        {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .output();
+        }
+        self.store.update_registry(|r| {
+            r.cloudflared.remove(&key);
+        });
+        self.store.update_claims(|c| {
+            c.remove(app);
+        });
+        if let Some(rec) = self.store.get(app) {
+            self.install_routes(&rec);
+        }
     }
 
     /// Supervise one claim's cloudflared (respawn on exit until released).
@@ -1297,6 +1385,40 @@ impl Daemon {
 
     /// Bring persisted desired state back to life after a daemon restart:
     /// containers running, routes registered, tunnels supervised.
+    /// Re-establish multi-connector HA: for every claimed domain whose app is
+    /// spread across the fleet, (re)push the connector to each spread machine
+    /// so the domain keeps a live connector there. Runs at startup and is
+    /// idempotent, so a device added or restarted later gets its replica back.
+    pub async fn reconcile_claim_replicas(self: &std::sync::Arc<Self>) {
+        let fleet = self.store.fleet_snapshot();
+        for (app, claim) in self.store.claims_snapshot() {
+            if app == CONTROL_CLAIM_KEY {
+                continue;
+            }
+            let Some(devices) = fleet.spreads.get(&app) else {
+                continue;
+            };
+            for dev in devices {
+                if let Some(client) = self.device_client(dev) {
+                    match client
+                        .adopt_claim_replica(
+                            &app,
+                            &claim.name,
+                            &claim.hostname,
+                            &claim.connector_token,
+                        )
+                        .await
+                    {
+                        Ok(_) => tracing::info!(app, device = %dev, "claim replica established"),
+                        Err(e) => {
+                            tracing::warn!(app, device = %dev, "claim replica push failed: {}", e.error)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn reconcile_all(self: &std::sync::Arc<Self>) {
         // bring claimed-domain tunnels back up
         for claim in self.store.claims_snapshot().values() {

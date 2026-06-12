@@ -115,6 +115,10 @@ pub fn router(d: D) -> Router {
         .route("/test", post(run_test))
         .route("/apps/{name}/spread", post(app_spread))
         .route("/apps/{name}/spread/{device}", delete(app_gather))
+        .route(
+            "/apps/{name}/claim-replica",
+            post(adopt_claim_replica).delete(drop_claim_replica),
+        )
         .route("/_relay/{*path}", any(relay))
         .route("/events", get(events))
         .route("/notify/test", post(notify_test))
@@ -985,6 +989,36 @@ async fn app_gather(State(d): State<D>, Path((name, device)): Path<(String, Stri
         Ok(removed) => Json(serde_json::json!({ "app": name, "gathered": removed })).into_response(),
         Err(e) => err_response(&e, None),
     }
+}
+
+#[derive(Deserialize)]
+struct ClaimReplicaBody {
+    name: String,
+    hostname: String,
+    connector_token: String,
+}
+
+/// Device side: serve a claimed domain as a second Cloudflare connector.
+async fn adopt_claim_replica(
+    State(d): State<D>,
+    Path(app): Path<String>,
+    Json(b): Json<ClaimReplicaBody>,
+) -> Response {
+    let record = crate::state::ClaimRecord {
+        app,
+        name: b.name,
+        hostname: b.hostname,
+        connector_token: b.connector_token,
+    };
+    match d.adopt_claim_replica(record) {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => err_response(&e, None),
+    }
+}
+
+async fn drop_claim_replica(State(d): State<D>, Path(app): Path<String>) -> Response {
+    d.drop_claim_replica(&app);
+    Json(serde_json::json!({ "ok": true })).into_response()
 }
 
 /// One catch-all for `/_relay/<app>[/...]`. A wildcard (rather than `{app}`

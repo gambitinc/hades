@@ -360,6 +360,16 @@ async fn main() {
     tokio::spawn(watchdog::run(d.clone()));
     tokio::spawn(fleet::poll(d.clone()));
 
+    // re-establish multi-connector HA for claimed domains once devices are
+    // reachable (idempotent; keeps the domain alive if this hub goes down)
+    {
+        let d2 = d.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(20)).await;
+            d2.reconcile_claim_replicas().await;
+        });
+    }
+
     // fleet-log aggregator: pull each device's recent events every 5s so the
     // dashboard can show a combined fleet feed without hammering devices.
     {
