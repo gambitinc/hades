@@ -29,6 +29,21 @@ pub async fn run(d: &Arc<Daemon>, scope: &str) -> TestReport {
         scope == "fleet" || scope == name || (scope == "local" && is_self)
     };
 
+    // a named device that isn't in the fleet is an error, not a silent pass
+    if scope != "fleet" && scope != "local" && !fleet.devices.iter().any(|m| m.name == scope) {
+        return TestReport {
+            scope: scope.into(),
+            checks: vec![TestCheck {
+                name: format!("device '{scope}'"),
+                pass: false,
+                detail: "not in the fleet — run `hades fleet` to see machines".into(),
+                group: "uptime".into(),
+            }],
+            passed: 0,
+            failed: 1,
+        };
+    }
+
     // 1 · uptime / health
     for m in &fleet.devices {
         if !in_scope(&m.name, m.is_self) {

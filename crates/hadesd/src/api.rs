@@ -46,6 +46,16 @@ fn err_response(e: &HadesError, detail: Option<serde_json::Value>) -> Response {
 /// Bearer-token gate on everything but /health. The control tunnel makes
 /// this API publicly reachable, so an unauthenticated request must never
 /// touch a handler that can run containers.
+/// Constant-time-ish compare for fixed-length random hex tokens.
+fn token_eq(expected: &str, got: &str) -> bool {
+    expected.len() == got.len()
+        && expected
+            .bytes()
+            .zip(got.bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
+}
+
 async fn require_auth(
     State(d): State<D>,
     req: axum::extract::Request,
@@ -56,19 +66,18 @@ async fn require_auth(
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "));
-    let ok = match (&d.config.auth_token, presented) {
-        (Some(expected), Some(got)) => {
-            // constant-time-ish compare; tokens are fixed-length random hex
-            expected.len() == got.len()
-                && expected
-                    .bytes()
-                    .zip(got.bytes())
-                    .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-                    == 0
-        }
-        _ => false,
-    };
-    if ok {
+    let by_hub_token = matches!((&d.config.auth_token, presented), (Some(e), Some(g)) if token_eq(e, g));
+    // the relay data path also accepts a fleet device's token, so a device can
+    // fall back to this host for an app when its own instance is down
+    let by_fleet_token = presented.is_some_and(|g| {
+        req.uri().path().starts_with("/_relay")
+            && d.store
+                .fleet_snapshot()
+                .devices
+                .iter()
+                .any(|dev| token_eq(&dev.token, g))
+    });
+    if by_hub_token || by_fleet_token {
         next.run(req).await
     } else {
         err_response(
