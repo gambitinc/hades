@@ -554,24 +554,6 @@ impl Daemon {
         }
         backends.extend(self.spread_backends(app));
 
-        // symmetric HA: a device serving a fleet-claimed app also relays to the
-        // hub, so if its own instance is down it falls back there instead of
-        // 502-ing (the hub's connector keeps serving the domain otherwise).
-        // The hub's /_relay only ever hits a local backend, so this can't loop.
-        if app != CONTROL_CLAIM_KEY {
-            if let (Some(hub), Some(tok)) = (
-                self.config.fleet.hub_url.clone(),
-                self.config.auth_token.clone(),
-            ) {
-                if self.store.claim_for(app).is_some() {
-                    backends.push(hades_proxy::Backend::Remote {
-                        relay: format!("{}/_relay/{}", hub.trim_end_matches('/'), app),
-                        token: tok,
-                    });
-                }
-            }
-        }
-
         self.table
             .set_app(app, hostnames, backends, rec.spec.max_concurrent_requests);
     }

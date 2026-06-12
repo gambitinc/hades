@@ -192,7 +192,9 @@ pub async fn poll(d: Arc<Daemon>) {
         if health_changed {
             d.refresh_all_routes();
         }
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        // poll fairly often so per-device live load on the dashboard stays
+        // fresh (a device's req/s otherwise lags by the poll interval)
+        tokio::time::sleep(Duration::from_secs(4)).await;
     }
 }
 
