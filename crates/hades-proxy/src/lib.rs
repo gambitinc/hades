@@ -383,8 +383,12 @@ async fn handle(
                         .map_err(|never| match never {})
                         .boxed(),
                 );
-                match client.request(outgoing).await {
-                    Ok(resp) => {
+                // bound the upstream so a stalled container fails fast (and
+                // falls through to another backend) instead of hanging the
+                // visitor for the client's full timeout
+                let fut = client.request(outgoing);
+                match tokio::time::timeout(std::time::Duration::from_secs(10), fut).await {
+                    Ok(Ok(resp)) => {
                         // served locally → counts as this machine's load
                         metrics.requests.fetch_add(1, Ordering::Relaxed);
                         if let Some(len) = resp
@@ -397,8 +401,12 @@ async fn handle(
                         }
                         Some(resp.map(|b| b.boxed()))
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         tracing::warn!(app = %route.app, backend = %addr, "local upstream error: {e}");
+                        None
+                    }
+                    Err(_) => {
+                        tracing::warn!(app = %route.app, backend = %addr, "local upstream timed out");
                         None
                     }
                 }
