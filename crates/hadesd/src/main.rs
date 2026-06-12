@@ -31,16 +31,6 @@ use hades_tunnel::QuickTunnelProvider;
 use crate::daemon::Daemon;
 use crate::state::Store;
 
-fn short_hostname() -> String {
-    std::process::Command::new("hostname")
-        .arg("-s")
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_lowercase())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "device".into())
-}
-
 fn generate_token() -> String {
     // 32 bytes of OS randomness, hex-encoded, no extra deps
     let mut buf = [0u8; 32];
