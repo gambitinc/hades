@@ -975,7 +975,9 @@ impl Daemon {
         name: &str,
         api_port: u16,
     ) -> Result<(String, String), HadesError> {
-        let proxy_url = format!("http://localhost:{api_port}");
+        // 127.0.0.1, never "localhost" (IPv6 ::1 first -> a stray same-port
+        // listener could intercept the control tunnel).
+        let proxy_url = format!("http://127.0.0.1:{api_port}");
         let mut req = self
             .http
             .post(format!("{}/claim", coord.trim_end_matches('/')))
@@ -1179,7 +1181,10 @@ impl Daemon {
             let _ = self.domain_release(app).await;
         }
 
-        let proxy_url = format!("http://localhost:{}", self.config.proxy_port);
+        // 127.0.0.1, never "localhost": localhost resolves to ::1 first, and a
+        // stray IPv6 listener on the same port (another project's container)
+        // would silently intercept every request the tunnel forwards.
+        let proxy_url = format!("http://127.0.0.1:{}", self.config.proxy_port);
         let mut req = self
             .http
             .post(format!("{}/claim", coord.trim_end_matches('/')))
