@@ -339,7 +339,7 @@ async fn main() {
             url,
         ) {
             let req = hades_api::types::JoinRequest {
-                name: short_hostname(),
+                name: d.device_name(),
                 control_url: url,
                 token: own_tok,
             };
@@ -514,7 +514,7 @@ async fn main() {
                             d2.config.auth_token.clone(),
                         ) {
                             let req = hades_api::types::JoinRequest {
-                                name: short_hostname(),
+                                name: d2.device_name(),
                                 control_url: tunnel.url.clone(),
                                 token: own_tok,
                             };

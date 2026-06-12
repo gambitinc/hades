@@ -905,7 +905,11 @@ async fn fleet_join(
         );
     }
     d.store.update_fleet(|f| {
-        f.devices.retain(|x| x.name != req.name);
+        // drop any prior entry with the same name OR the same control URL, so a
+        // machine that changed its hostname updates its entry instead of
+        // leaving a duplicate behind
+        f.devices
+            .retain(|x| x.name != req.name && x.control_url != req.control_url);
         f.devices.push(crate::fleet::FleetDeviceRecord {
             name: req.name.clone(),
             control_url: req.control_url.clone(),

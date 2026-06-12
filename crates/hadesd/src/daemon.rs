@@ -1028,11 +1028,12 @@ impl Daemon {
             self.config.auth_token.clone(),
         ) {
             let url = format!("https://{hostname}");
+            let name = self.device_name();
             tokio::spawn(async move {
                 // give the named tunnel a few seconds to become routable
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 let req = hades_api::types::JoinRequest {
-                    name: crate::fleet::short_hostname(),
+                    name,
                     control_url: url,
                     token: own_tok,
                 };
@@ -1050,6 +1051,15 @@ impl Daemon {
     /// The stable control claim, if this host has one.
     pub fn control_claim_record(&self) -> Option<crate::state::ClaimRecord> {
         self.store.claim_for(CONTROL_CLAIM_KEY)
+    }
+
+    /// This host's STABLE fleet identity: the control-claim label (which never
+    /// changes) when stabilized, else the short hostname. Registering under
+    /// this avoids a duplicate fleet entry when the machine's hostname changes.
+    pub fn device_name(&self) -> String {
+        self.control_claim_record()
+            .map(|c| c.name)
+            .unwrap_or_else(crate::fleet::short_hostname)
     }
 
     /// Under sustained memory pressure, move one app off this machine: spread
